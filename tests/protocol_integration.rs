@@ -2,7 +2,7 @@ use taskforest_protocol::instruction::TaskForestInstruction;
 use taskforest_protocol::processor::{process_instruction, ProcessorOutput};
 use taskforest_protocol::{
     CancelJobParams, ClaimJobParams, CreateJobParams, ExpireClaimParams, JobStatus, ProtocolError,
-    SubmitProofParams, TaskForestProtocol,
+    SubmitProofParams, TaskForestProtocol, VerificationBackend,
 };
 
 fn seed_job(protocol: &mut TaskForestProtocol, id: u64) {
@@ -36,8 +36,10 @@ fn integration_full_flow_via_instruction_dispatch() {
 
     process_instruction(
         &mut protocol,
-        TaskForestInstruction::unpack(b"submit_proof|100|worker-int|proof-int|9500")
-            .expect("submit unpack"),
+        TaskForestInstruction::unpack(
+            b"submit_proof|100|worker-int|proof-int|9500|ci://100|artifact://100",
+        )
+        .expect("submit unpack"),
     )
     .expect("submit should process");
 
@@ -52,6 +54,7 @@ fn integration_full_flow_via_instruction_dispatch() {
         ProcessorOutput::Settled(settlement) => {
             assert_eq!(settlement.worker_payout_usdc, 5_000);
             assert_eq!(settlement.stake_returned_usdc, 700);
+            assert_eq!(settlement.verification_backend, VerificationBackend::Native);
         }
         ProcessorOutput::None => panic!("expected settlement output"),
     }
@@ -147,6 +150,7 @@ fn integration_submitter_must_match_claimer() {
             submitter: "worker-wrong".to_string(),
             proof_hash: "proof-103".to_string(),
             now_epoch_secs: 8_700,
+            evidence_refs: vec![],
         }),
     );
 

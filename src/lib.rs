@@ -8,6 +8,15 @@ pub mod state;
 pub type JobId = u64;
 pub type ActorId = String;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerificationBackend {
+    Native,
+    Arcium,
+    MagicBlock,
+    Hybrid,
+    Custom(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobStatus {
     Open,
@@ -57,6 +66,7 @@ pub struct Claim {
 pub struct ProofSubmission {
     pub proof_hash: String,
     pub submitted_at_epoch_secs: u64,
+    pub evidence_refs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,10 +74,29 @@ pub struct Settlement {
     pub verdict: Verdict,
     pub settled_at_epoch_secs: u64,
     pub reason_code: String,
+    pub verification_backend: VerificationBackend,
+    pub verification_ref: Option<String>,
     pub worker_payout_usdc: u64,
     pub poster_refund_usdc: u64,
     pub stake_returned_usdc: u64,
     pub stake_slashed_usdc: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtocolCapabilities {
+    pub allow_confidential_verification: bool,
+    pub allow_realtime_execution: bool,
+    pub extension_flags: HashMap<String, String>,
+}
+
+impl Default for ProtocolCapabilities {
+    fn default() -> Self {
+        Self {
+            allow_confidential_verification: false,
+            allow_realtime_execution: false,
+            extension_flags: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,12 +119,14 @@ pub enum ProtocolError {
 #[derive(Debug, Default)]
 pub struct TaskForestProtocol {
     jobs: HashMap<JobId, Job>,
+    capabilities: ProtocolCapabilities,
 }
 
 impl TaskForestProtocol {
     pub fn new() -> Self {
         Self {
             jobs: HashMap::new(),
+            capabilities: ProtocolCapabilities::default(),
         }
     }
 
@@ -168,6 +199,7 @@ impl TaskForestProtocol {
         job.proof = Some(ProofSubmission {
             proof_hash: params.proof_hash,
             submitted_at_epoch_secs: params.now_epoch_secs,
+            evidence_refs: params.evidence_refs,
         });
         job.status = JobStatus::Submitted;
         Ok(())
@@ -200,6 +232,8 @@ impl TaskForestProtocol {
                 verdict: Verdict::Pass,
                 settled_at_epoch_secs: params.now_epoch_secs,
                 reason_code: params.reason_code,
+                verification_backend: params.verification_backend.clone(),
+                verification_ref: params.verification_ref.clone(),
                 worker_payout_usdc: reward,
                 poster_refund_usdc: 0,
                 stake_returned_usdc: stake,
@@ -209,6 +243,8 @@ impl TaskForestProtocol {
                 verdict: Verdict::Fail,
                 settled_at_epoch_secs: params.now_epoch_secs,
                 reason_code: params.reason_code,
+                verification_backend: params.verification_backend.clone(),
+                verification_ref: params.verification_ref.clone(),
                 worker_payout_usdc: 0,
                 poster_refund_usdc: reward,
                 stake_returned_usdc: 0,
@@ -281,6 +317,8 @@ impl TaskForestProtocol {
             verdict: Verdict::Fail,
             settled_at_epoch_secs: params.now_epoch_secs,
             reason_code: "DEADLINE_EXPIRED".to_string(),
+            verification_backend: VerificationBackend::Native,
+            verification_ref: None,
             worker_payout_usdc: 0,
             poster_refund_usdc: job.reward_usdc,
             stake_returned_usdc: 0,
@@ -296,6 +334,24 @@ impl TaskForestProtocol {
 
     pub fn job_count(&self) -> usize {
         self.jobs.len()
+    }
+
+    pub fn enable_extension(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.capabilities
+            .extension_flags
+            .insert(key.into(), value.into());
+    }
+
+    pub fn set_confidential_verification(&mut self, enabled: bool) {
+        self.capabilities.allow_confidential_verification = enabled;
+    }
+
+    pub fn set_realtime_execution(&mut self, enabled: bool) {
+        self.capabilities.allow_realtime_execution = enabled;
+    }
+
+    pub fn capabilities(&self) -> &ProtocolCapabilities {
+        &self.capabilities
     }
 }
 
@@ -322,6 +378,7 @@ pub struct SubmitProofParams {
     pub submitter: ActorId,
     pub proof_hash: String,
     pub now_epoch_secs: u64,
+    pub evidence_refs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -330,6 +387,8 @@ pub struct SettleJobParams {
     pub verdict: Verdict,
     pub reason_code: String,
     pub now_epoch_secs: u64,
+    pub verification_backend: VerificationBackend,
+    pub verification_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -382,6 +441,7 @@ mod tests {
                 submitter: "worker-a".to_string(),
                 proof_hash: "proof-hash-123".to_string(),
                 now_epoch_secs: 1_200,
+                evidence_refs: vec!["ci://run/1".to_string()],
             })
             .expect("proof submit should succeed");
 
@@ -391,12 +451,15 @@ mod tests {
                 verdict: Verdict::Pass,
                 reason_code: "CHECKS_PASS_ALL".to_string(),
                 now_epoch_secs: 1_300,
+                verification_backend: VerificationBackend::Native,
+                verification_ref: Some("verifier://native/1".to_string()),
             })
             .expect("settle pass should succeed");
 
         assert_eq!(settlement.worker_payout_usdc, 1_000);
         assert_eq!(settlement.stake_returned_usdc, 200);
         assert_eq!(settlement.poster_refund_usdc, 0);
+        assert_eq!(settlement.verification_backend, VerificationBackend::Native);
 
         let job = protocol.get_job(1).expect("job should exist");
         assert_eq!(job.status, JobStatus::Done);
@@ -422,6 +485,7 @@ mod tests {
                 submitter: "worker-b".to_string(),
                 proof_hash: "bad-proof".to_string(),
                 now_epoch_secs: 1_500,
+                evidence_refs: vec!["ci://run/2".to_string()],
             })
             .expect("proof submit should succeed");
 
@@ -431,6 +495,8 @@ mod tests {
                 verdict: Verdict::Fail,
                 reason_code: "CI_REQUIRED_FAILED".to_string(),
                 now_epoch_secs: 1_600,
+                verification_backend: VerificationBackend::Native,
+                verification_ref: Some("verifier://native/2".to_string()),
             })
             .expect("settle fail should succeed");
 
@@ -476,6 +542,8 @@ mod tests {
             verdict: Verdict::Pass,
             reason_code: "CHECKS_PASS_ALL".to_string(),
             now_epoch_secs: 1_100,
+            verification_backend: VerificationBackend::Native,
+            verification_ref: None,
         });
 
         assert_eq!(result, Err(ProtocolError::WrongStatus));
@@ -501,6 +569,7 @@ mod tests {
                 submitter: "worker-e".to_string(),
                 proof_hash: "proof-hash-5".to_string(),
                 now_epoch_secs: 1_200,
+                evidence_refs: vec!["ci://run/5".to_string()],
             })
             .expect("proof submit should succeed");
 
@@ -512,6 +581,8 @@ mod tests {
                 verdict: Verdict::Fail,
                 reason_code: "DISPUTE_POSTER_UPHELD".to_string(),
                 now_epoch_secs: 1_300,
+                verification_backend: VerificationBackend::Arcium,
+                verification_ref: Some("arcium://proof/5".to_string()),
             })
             .expect("disputed settlement should succeed");
 
@@ -534,18 +605,23 @@ mod tests {
             .expect("claim instruction should unpack");
         process_instruction(&mut protocol, claim).expect("claim should process");
 
-        let submit = TaskForestInstruction::unpack(b"submit_proof|9|worker-z|proof-9|1300")
-            .expect("submit instruction should unpack");
+        let submit = TaskForestInstruction::unpack(
+            b"submit_proof|9|worker-z|proof-9|1300|ci://9|artifact://9",
+        )
+        .expect("submit instruction should unpack");
         process_instruction(&mut protocol, submit).expect("submit should process");
 
-        let settle = TaskForestInstruction::unpack(b"settle_job|9|pass|CHECKS_PASS_ALL|1400")
-            .expect("settle instruction should unpack");
+        let settle = TaskForestInstruction::unpack(
+            b"settle_job|9|pass|CHECKS_PASS_ALL|1400|magicblock|mb://receipt/9",
+        )
+        .expect("settle instruction should unpack");
         let result = process_instruction(&mut protocol, settle).expect("settle should process");
 
         match result {
             ProcessorOutput::Settled(s) => {
                 assert_eq!(s.worker_payout_usdc, 1000);
                 assert_eq!(s.stake_returned_usdc, 111);
+                assert_eq!(s.verification_backend, VerificationBackend::MagicBlock);
             }
             ProcessorOutput::None => panic!("expected settlement output"),
         }
@@ -570,6 +646,7 @@ mod tests {
             submitter: "imposter".to_string(),
             proof_hash: "proof-hash-6".to_string(),
             now_epoch_secs: 1_100,
+            evidence_refs: vec![],
         });
 
         assert_eq!(result, Err(ProtocolError::InvalidClaimant));
@@ -618,5 +695,22 @@ mod tests {
         assert_eq!(settlement.reason_code, "DEADLINE_EXPIRED");
         assert_eq!(settlement.poster_refund_usdc, 1_000);
         assert_eq!(settlement.stake_slashed_usdc, 250);
+    }
+
+    #[test]
+    fn protocol_capabilities_support_extension_flags() {
+        let mut protocol = TaskForestProtocol::new();
+        protocol.set_confidential_verification(true);
+        protocol.set_realtime_execution(true);
+        protocol.enable_extension("arcium.mode", "proof-batching");
+        protocol.enable_extension("magicblock.session", "enabled");
+
+        let caps = protocol.capabilities();
+        assert!(caps.allow_confidential_verification);
+        assert!(caps.allow_realtime_execution);
+        assert_eq!(
+            caps.extension_flags.get("arcium.mode"),
+            Some(&"proof-batching".to_string())
+        );
     }
 }

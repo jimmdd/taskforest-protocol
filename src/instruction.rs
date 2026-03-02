@@ -1,6 +1,6 @@
 use crate::{
     ActorId, CancelJobParams, ClaimJobParams, CreateJobParams, ExpireClaimParams, JobId,
-    SettleJobParams, SubmitProofParams, Verdict,
+    SettleJobParams, SubmitProofParams, Verdict, VerificationBackend,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +60,7 @@ impl TaskForestInstruction {
                 }))
             }
             "submit_proof" => {
-                if parts.len() != 5 {
+                if parts.len() < 5 {
                     return Err(InstructionDecodeError::InvalidFormat);
                 }
                 Ok(Self::SubmitProof(SubmitProofParams {
@@ -68,17 +68,30 @@ impl TaskForestInstruction {
                     submitter: parse_actor(parts[2]),
                     proof_hash: parts[3].to_string(),
                     now_epoch_secs: parse_u64(parts[4])?,
+                    evidence_refs: parts[5..].iter().map(|v| (*v).to_string()).collect(),
                 }))
             }
             "settle_job" => {
-                if parts.len() != 5 {
+                if parts.len() != 5 && parts.len() != 6 && parts.len() != 7 {
                     return Err(InstructionDecodeError::InvalidFormat);
                 }
+                let backend = if parts.len() >= 6 {
+                    parse_backend(parts[5])
+                } else {
+                    VerificationBackend::Native
+                };
+                let verification_ref = if parts.len() == 7 {
+                    Some(parts[6].to_string())
+                } else {
+                    None
+                };
                 Ok(Self::SettleJob(SettleJobParams {
                     job_id: parse_u64(parts[1])?,
                     verdict: parse_verdict(parts[2])?,
                     reason_code: parts[3].to_string(),
                     now_epoch_secs: parse_u64(parts[4])?,
+                    verification_backend: backend,
+                    verification_ref,
                 }))
             }
             "open_dispute" => {
@@ -129,6 +142,16 @@ fn parse_verdict(value: &str) -> Result<Verdict, InstructionDecodeError> {
     }
 }
 
+fn parse_backend(value: &str) -> VerificationBackend {
+    match value {
+        "native" => VerificationBackend::Native,
+        "arcium" => VerificationBackend::Arcium,
+        "magicblock" => VerificationBackend::MagicBlock,
+        "hybrid" => VerificationBackend::Hybrid,
+        other => VerificationBackend::Custom(other.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +183,25 @@ mod tests {
     fn reject_invalid_submit_proof_shape() {
         let result = TaskForestInstruction::unpack(b"submit_proof|1|proof-hash-only|2000");
         assert_eq!(result, Err(InstructionDecodeError::InvalidFormat));
+    }
+
+    #[test]
+    fn settle_instruction_supports_backend_and_ref() {
+        let instruction = TaskForestInstruction::unpack(
+            b"settle_job|77|pass|CHECKS_PASS_ALL|1000|arcium|arcium://proof/77",
+        )
+        .expect("settle should unpack");
+
+        match instruction {
+            TaskForestInstruction::SettleJob(params) => {
+                assert_eq!(params.job_id, 77);
+                assert_eq!(params.verification_backend, VerificationBackend::Arcium);
+                assert_eq!(
+                    params.verification_ref,
+                    Some("arcium://proof/77".to_string())
+                );
+            }
+            _ => panic!("expected settle instruction"),
+        }
     }
 }

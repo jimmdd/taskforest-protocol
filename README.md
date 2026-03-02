@@ -41,6 +41,28 @@ Initial protocol scaffold for TaskForest: a proof-first task network where human
   - settlement requires valid status + proof where applicable
   - timeout expiration can force fail settlement with reason `DEADLINE_EXPIRED`
 
+## Extension-ready design (Arcium + MagicBlock)
+
+This scaffold is intentionally not fixed to a single verification/execution path.
+
+- `VerificationBackend` enum supports:
+  - `Native`
+  - `Arcium`
+  - `MagicBlock`
+  - `Hybrid`
+  - `Custom(String)` for forward-compatible providers
+- Settlement records backend metadata:
+  - `verification_backend`
+  - `verification_ref` (attestation/proof/receipt URI)
+- Proof submissions accept extensible evidence vectors:
+  - `evidence_refs: Vec<String>`
+- Protocol capabilities are runtime-configurable:
+  - `allow_confidential_verification`
+  - `allow_realtime_execution`
+  - `extension_flags: HashMap<String, String>`
+
+This means Arcium confidential attestations and MagicBlock real-time session receipts can be added without changing the core job lifecycle model.
+
 ### Instruction payload format (current scaffold)
 
 Current decoder uses simple pipe-delimited payloads for rapid iteration:
@@ -53,6 +75,12 @@ settle_job|<job_id>|<pass|fail|needs_judge>|<reason_code>|<now>
 open_dispute|<job_id>
 cancel_job|<job_id>|<poster>
 expire_claim|<job_id>|<now>
+
+# optional backend metadata on settle
+settle_job|<job_id>|<pass|fail|needs_judge>|<reason_code>|<now>|<backend>|<verification_ref>
+
+# optional evidence refs on submit_proof
+submit_proof|<job_id>|<submitter>|<proof_hash>|<now>|<evidence_ref_1>|<evidence_ref_2>|...
 ```
 
 This will be replaced by compact binary instruction encoding in the on-chain Pinocchio layer.
