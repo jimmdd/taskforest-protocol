@@ -114,6 +114,25 @@ Compile checks:
 cargo check
 ```
 
+## Feature-gated Pinocchio entrypoint scaffold
+
+This repo now includes a `bpf-entrypoint` feature that compiles a minimal Pinocchio program entrypoint in:
+
+- `src/bpf_entrypoint.rs`
+
+What it does now:
+- Declares a program id.
+- Exposes `process_instruction` via `pinocchio::entrypoint!`.
+- Validates/decodes TaskForest instruction payloads.
+
+Build check with the feature enabled:
+
+```bash
+cargo check --features bpf-entrypoint
+```
+
+This keeps the domain state machine and tests independent while we progressively map account parsing and state persistence for real on-chain execution.
+
 ## Next steps
 
 1. Add Pinocchio account layouts (`Job`, `Claim`, config`) and account parsers.

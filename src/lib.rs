@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+#[cfg(feature = "bpf-entrypoint")]
+pub mod bpf_entrypoint;
 pub mod error;
 pub mod instruction;
 pub mod processor;
