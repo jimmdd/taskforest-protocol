@@ -91,6 +91,35 @@ pub struct ProtocolCapabilities {
     pub extension_flags: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtocolPolicy {
+    pub min_stake_bps: u16,
+    pub max_active_claims_per_claimer: u16,
+    pub max_active_exposure_per_claimer: u64,
+    pub min_evidence_refs: usize,
+    pub require_verification_ref_on_pass: bool,
+    pub high_value_threshold_usdc: u64,
+    pub required_verifier_approvals: u8,
+    pub required_verifier_approvals_high_value: u8,
+    pub min_pass_settlement_delay_secs: u64,
+}
+
+impl Default for ProtocolPolicy {
+    fn default() -> Self {
+        Self {
+            min_stake_bps: 1000,
+            max_active_claims_per_claimer: 5,
+            max_active_exposure_per_claimer: 50_000,
+            min_evidence_refs: 1,
+            require_verification_ref_on_pass: true,
+            high_value_threshold_usdc: 10_000,
+            required_verifier_approvals: 1,
+            required_verifier_approvals_high_value: 2,
+            min_pass_settlement_delay_secs: 60,
+        }
+    }
+}
+
 impl Default for ProtocolCapabilities {
     fn default() -> Self {
         Self {
@@ -116,12 +145,20 @@ pub enum ProtocolError {
     WrongStatus,
     Unauthorized,
     InvalidClaimant,
+    InsufficientStake,
+    TooManyActiveClaims,
+    ExposureLimitExceeded,
+    InsufficientEvidence,
+    MissingVerificationRef,
+    InsufficientVerifierApprovals,
+    ChallengeWindowNotElapsed,
 }
 
 #[derive(Debug, Default)]
 pub struct TaskForestProtocol {
     jobs: HashMap<JobId, Job>,
     capabilities: ProtocolCapabilities,
+    policy: ProtocolPolicy,
 }
 
 impl TaskForestProtocol {
@@ -129,6 +166,7 @@ impl TaskForestProtocol {
         Self {
             jobs: HashMap::new(),
             capabilities: ProtocolCapabilities::default(),
+            policy: ProtocolPolicy::default(),
         }
     }
 
@@ -155,6 +193,33 @@ impl TaskForestProtocol {
     }
 
     pub fn claim_job(&mut self, params: ClaimJobParams) -> Result<(), ProtocolError> {
+        let active_claims = self.active_claim_count(&params.claimer);
+        if active_claims >= self.policy.max_active_claims_per_claimer as usize {
+            return Err(ProtocolError::TooManyActiveClaims);
+        }
+
+        let target_reward = self
+            .jobs
+            .get(&params.job_id)
+            .ok_or(ProtocolError::JobNotFound)?
+            .reward_usdc;
+
+        if params.stake_usdc == 0 {
+            return Err(ProtocolError::InvalidAmount);
+        }
+        let min_stake =
+            ((target_reward as u128 * self.policy.min_stake_bps as u128) / 10_000) as u64;
+        if params.stake_usdc < min_stake {
+            return Err(ProtocolError::InsufficientStake);
+        }
+
+        let active_exposure = self.active_exposure(&params.claimer);
+        if active_exposure.saturating_add(target_reward)
+            > self.policy.max_active_exposure_per_claimer
+        {
+            return Err(ProtocolError::ExposureLimitExceeded);
+        }
+
         let job = self
             .jobs
             .get_mut(&params.job_id)
@@ -162,9 +227,6 @@ impl TaskForestProtocol {
 
         if job.status != JobStatus::Open {
             return Err(ProtocolError::AlreadyClaimed);
-        }
-        if params.stake_usdc == 0 {
-            return Err(ProtocolError::InvalidAmount);
         }
         if params.now_epoch_secs > job.deadline_epoch_secs {
             return Err(ProtocolError::DeadlinePassed);
@@ -193,6 +255,9 @@ impl TaskForestProtocol {
         }
         if job.claim.as_ref().map(|c| c.claimer.as_str()) != Some(params.submitter.as_str()) {
             return Err(ProtocolError::InvalidClaimant);
+        }
+        if params.evidence_refs.len() < self.policy.min_evidence_refs {
+            return Err(ProtocolError::InsufficientEvidence);
         }
         if job.proof.is_some() {
             return Err(ProtocolError::AlreadySubmitted);
@@ -226,8 +291,35 @@ impl TaskForestProtocol {
             return Err(ProtocolError::MissingProof);
         }
 
-        let stake = job.claim.as_ref().map(|c| c.stake_usdc).unwrap_or(0);
         let reward = job.reward_usdc;
+        let stake = job.claim.as_ref().map(|c| c.stake_usdc).unwrap_or(0);
+
+        if params.verdict == Verdict::Pass {
+            let submitted_at = job
+                .proof
+                .as_ref()
+                .map(|p| p.submitted_at_epoch_secs)
+                .ok_or(ProtocolError::MissingProof)?;
+
+            if params.now_epoch_secs
+                < submitted_at.saturating_add(self.policy.min_pass_settlement_delay_secs)
+            {
+                return Err(ProtocolError::ChallengeWindowNotElapsed);
+            }
+
+            if self.policy.require_verification_ref_on_pass && params.verification_ref.is_none() {
+                return Err(ProtocolError::MissingVerificationRef);
+            }
+
+            let required_approvals = if reward >= self.policy.high_value_threshold_usdc {
+                self.policy.required_verifier_approvals_high_value
+            } else {
+                self.policy.required_verifier_approvals
+            };
+            if params.verifier_approvals < required_approvals {
+                return Err(ProtocolError::InsufficientVerifierApprovals);
+            }
+        }
 
         let settlement = match params.verdict {
             Verdict::Pass => Settlement {
@@ -355,6 +447,47 @@ impl TaskForestProtocol {
     pub fn capabilities(&self) -> &ProtocolCapabilities {
         &self.capabilities
     }
+
+    pub fn policy(&self) -> &ProtocolPolicy {
+        &self.policy
+    }
+
+    pub fn policy_mut(&mut self) -> &mut ProtocolPolicy {
+        &mut self.policy
+    }
+
+    fn active_claim_count(&self, claimer: &str) -> usize {
+        self.jobs
+            .values()
+            .filter(|job| {
+                matches!(
+                    job.status,
+                    JobStatus::Claimed | JobStatus::Submitted | JobStatus::Disputed
+                ) && job
+                    .claim
+                    .as_ref()
+                    .map(|c| c.claimer.as_str() == claimer)
+                    .unwrap_or(false)
+            })
+            .count()
+    }
+
+    fn active_exposure(&self, claimer: &str) -> u64 {
+        self.jobs
+            .values()
+            .filter(|job| {
+                matches!(
+                    job.status,
+                    JobStatus::Claimed | JobStatus::Submitted | JobStatus::Disputed
+                ) && job
+                    .claim
+                    .as_ref()
+                    .map(|c| c.claimer.as_str() == claimer)
+                    .unwrap_or(false)
+            })
+            .map(|job| job.reward_usdc)
+            .sum()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -391,6 +524,7 @@ pub struct SettleJobParams {
     pub now_epoch_secs: u64,
     pub verification_backend: VerificationBackend,
     pub verification_ref: Option<String>,
+    pub verifier_approvals: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -455,6 +589,7 @@ mod tests {
                 now_epoch_secs: 1_300,
                 verification_backend: VerificationBackend::Native,
                 verification_ref: Some("verifier://native/1".to_string()),
+                verifier_approvals: 1,
             })
             .expect("settle pass should succeed");
 
@@ -499,6 +634,7 @@ mod tests {
                 now_epoch_secs: 1_600,
                 verification_backend: VerificationBackend::Native,
                 verification_ref: Some("verifier://native/2".to_string()),
+                verifier_approvals: 1,
             })
             .expect("settle fail should succeed");
 
@@ -546,6 +682,7 @@ mod tests {
             now_epoch_secs: 1_100,
             verification_backend: VerificationBackend::Native,
             verification_ref: None,
+            verifier_approvals: 1,
         });
 
         assert_eq!(result, Err(ProtocolError::WrongStatus));
@@ -585,6 +722,7 @@ mod tests {
                 now_epoch_secs: 1_300,
                 verification_backend: VerificationBackend::Arcium,
                 verification_ref: Some("arcium://proof/5".to_string()),
+                verifier_approvals: 1,
             })
             .expect("disputed settlement should succeed");
 
@@ -638,7 +776,7 @@ mod tests {
             .claim_job(ClaimJobParams {
                 job_id: 6,
                 claimer: "worker-f".to_string(),
-                stake_usdc: 99,
+                stake_usdc: 100,
                 now_epoch_secs: 1_000,
             })
             .expect("claim should succeed");
@@ -714,5 +852,164 @@ mod tests {
             caps.extension_flags.get("arcium.mode"),
             Some(&"proof-batching".to_string())
         );
+    }
+
+    #[test]
+    fn insufficient_stake_is_rejected() {
+        let mut protocol = TaskForestProtocol::new();
+        create_default_job(&mut protocol, 10);
+
+        let result = protocol.claim_job(ClaimJobParams {
+            job_id: 10,
+            claimer: "worker-low-stake".to_string(),
+            stake_usdc: 99,
+            now_epoch_secs: 1_000,
+        });
+
+        assert_eq!(result, Err(ProtocolError::InsufficientStake));
+    }
+
+    #[test]
+    fn insufficient_evidence_is_rejected() {
+        let mut protocol = TaskForestProtocol::new();
+        create_default_job(&mut protocol, 11);
+
+        protocol
+            .claim_job(ClaimJobParams {
+                job_id: 11,
+                claimer: "worker-evidence".to_string(),
+                stake_usdc: 100,
+                now_epoch_secs: 1_000,
+            })
+            .expect("claim should pass");
+
+        let result = protocol.submit_proof(SubmitProofParams {
+            job_id: 11,
+            submitter: "worker-evidence".to_string(),
+            proof_hash: "proof-11".to_string(),
+            now_epoch_secs: 1_100,
+            evidence_refs: vec![],
+        });
+
+        assert_eq!(result, Err(ProtocolError::InsufficientEvidence));
+    }
+
+    #[test]
+    fn pass_settlement_requires_verification_ref_and_delay() {
+        let mut protocol = TaskForestProtocol::new();
+        create_default_job(&mut protocol, 12);
+
+        protocol
+            .claim_job(ClaimJobParams {
+                job_id: 12,
+                claimer: "worker-verify".to_string(),
+                stake_usdc: 100,
+                now_epoch_secs: 1_000,
+            })
+            .expect("claim should pass");
+
+        protocol
+            .submit_proof(SubmitProofParams {
+                job_id: 12,
+                submitter: "worker-verify".to_string(),
+                proof_hash: "proof-12".to_string(),
+                now_epoch_secs: 1_100,
+                evidence_refs: vec!["ci://12".to_string()],
+            })
+            .expect("proof submit should pass");
+
+        let early = protocol.settle_job(SettleJobParams {
+            job_id: 12,
+            verdict: Verdict::Pass,
+            reason_code: "CHECKS_PASS_ALL".to_string(),
+            now_epoch_secs: 1_150,
+            verification_backend: VerificationBackend::Native,
+            verification_ref: Some("verifier://12".to_string()),
+            verifier_approvals: 1,
+        });
+        assert_eq!(early, Err(ProtocolError::ChallengeWindowNotElapsed));
+
+        let missing_ref = protocol.settle_job(SettleJobParams {
+            job_id: 12,
+            verdict: Verdict::Pass,
+            reason_code: "CHECKS_PASS_ALL".to_string(),
+            now_epoch_secs: 1_200,
+            verification_backend: VerificationBackend::Native,
+            verification_ref: None,
+            verifier_approvals: 1,
+        });
+        assert_eq!(missing_ref, Err(ProtocolError::MissingVerificationRef));
+    }
+
+    #[test]
+    fn high_value_job_requires_multiple_verifier_approvals() {
+        let mut protocol = TaskForestProtocol::new();
+        protocol
+            .create_job(CreateJobParams {
+                job_id: 13,
+                poster: "poster-high".to_string(),
+                reward_usdc: 20_000,
+                deadline_epoch_secs: 5_000,
+                proof_spec_hash: "high-value-proof-spec".to_string(),
+            })
+            .expect("create should pass");
+
+        protocol
+            .claim_job(ClaimJobParams {
+                job_id: 13,
+                claimer: "worker-high".to_string(),
+                stake_usdc: 2_000,
+                now_epoch_secs: 1_000,
+            })
+            .expect("claim should pass");
+
+        protocol
+            .submit_proof(SubmitProofParams {
+                job_id: 13,
+                submitter: "worker-high".to_string(),
+                proof_hash: "proof-13".to_string(),
+                now_epoch_secs: 1_100,
+                evidence_refs: vec!["ci://13".to_string()],
+            })
+            .expect("proof should pass");
+
+        let result = protocol.settle_job(SettleJobParams {
+            job_id: 13,
+            verdict: Verdict::Pass,
+            reason_code: "CHECKS_PASS_ALL".to_string(),
+            now_epoch_secs: 1_200,
+            verification_backend: VerificationBackend::Native,
+            verification_ref: Some("verifier://13".to_string()),
+            verifier_approvals: 1,
+        });
+
+        assert_eq!(result, Err(ProtocolError::InsufficientVerifierApprovals));
+    }
+
+    #[test]
+    fn claim_caps_block_hoarding_behavior() {
+        let mut protocol = TaskForestProtocol::new();
+        protocol.policy_mut().max_active_claims_per_claimer = 1;
+
+        create_default_job(&mut protocol, 14);
+        create_default_job(&mut protocol, 15);
+
+        protocol
+            .claim_job(ClaimJobParams {
+                job_id: 14,
+                claimer: "worker-cap".to_string(),
+                stake_usdc: 100,
+                now_epoch_secs: 1_000,
+            })
+            .expect("first claim should pass");
+
+        let second = protocol.claim_job(ClaimJobParams {
+            job_id: 15,
+            claimer: "worker-cap".to_string(),
+            stake_usdc: 100,
+            now_epoch_secs: 1_000,
+        });
+
+        assert_eq!(second, Err(ProtocolError::TooManyActiveClaims));
     }
 }

@@ -72,7 +72,7 @@ impl TaskForestInstruction {
                 }))
             }
             "settle_job" => {
-                if parts.len() != 5 && parts.len() != 6 && parts.len() != 7 {
+                if parts.len() != 5 && parts.len() != 6 && parts.len() != 7 && parts.len() != 8 {
                     return Err(InstructionDecodeError::InvalidFormat);
                 }
                 let backend = if parts.len() >= 6 {
@@ -80,11 +80,20 @@ impl TaskForestInstruction {
                 } else {
                     VerificationBackend::Native
                 };
-                let verification_ref = if parts.len() == 7 {
-                    Some(parts[6].to_string())
-                } else {
-                    None
-                };
+                let mut verification_ref = None;
+                let mut verifier_approvals = 1u8;
+                if parts.len() == 7 {
+                    if let Ok(parsed) = parts[6].parse::<u8>() {
+                        verifier_approvals = parsed;
+                    } else {
+                        verification_ref = Some(parts[6].to_string());
+                    }
+                } else if parts.len() == 8 {
+                    verification_ref = Some(parts[6].to_string());
+                    verifier_approvals = parts[7]
+                        .parse::<u8>()
+                        .map_err(|_| InstructionDecodeError::InvalidNumber)?;
+                }
                 Ok(Self::SettleJob(SettleJobParams {
                     job_id: parse_u64(parts[1])?,
                     verdict: parse_verdict(parts[2])?,
@@ -92,6 +101,7 @@ impl TaskForestInstruction {
                     now_epoch_secs: parse_u64(parts[4])?,
                     verification_backend: backend,
                     verification_ref,
+                    verifier_approvals,
                 }))
             }
             "open_dispute" => {
@@ -200,6 +210,24 @@ mod tests {
                     params.verification_ref,
                     Some("arcium://proof/77".to_string())
                 );
+                assert_eq!(params.verifier_approvals, 1);
+            }
+            _ => panic!("expected settle instruction"),
+        }
+    }
+
+    #[test]
+    fn settle_instruction_supports_ref_and_approvals() {
+        let instruction = TaskForestInstruction::unpack(
+            b"settle_job|88|pass|CHECKS_PASS_ALL|1000|magicblock|mb://proof/88|3",
+        )
+        .expect("settle should unpack");
+
+        match instruction {
+            TaskForestInstruction::SettleJob(params) => {
+                assert_eq!(params.verification_backend, VerificationBackend::MagicBlock);
+                assert_eq!(params.verification_ref, Some("mb://proof/88".to_string()));
+                assert_eq!(params.verifier_approvals, 3);
             }
             _ => panic!("expected settle instruction"),
         }

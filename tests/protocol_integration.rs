@@ -45,8 +45,10 @@ fn integration_full_flow_via_instruction_dispatch() {
 
     let output = process_instruction(
         &mut protocol,
-        TaskForestInstruction::unpack(b"settle_job|100|pass|CHECKS_PASS_ALL|9600")
-            .expect("settle unpack"),
+        TaskForestInstruction::unpack(
+            b"settle_job|100|pass|CHECKS_PASS_ALL|9600|native|verifier://native/100|1",
+        )
+        .expect("settle unpack"),
     )
     .expect("settle should process");
 
@@ -101,7 +103,7 @@ fn integration_expire_claim_transitions_and_sets_settlement() {
         TaskForestInstruction::ClaimJob(ClaimJobParams {
             job_id: 102,
             claimer: "worker-timeout".to_string(),
-            stake_usdc: 300,
+            stake_usdc: 500,
             now_epoch_secs: 8_000,
         }),
     )
@@ -124,7 +126,7 @@ fn integration_expire_claim_transitions_and_sets_settlement() {
         .expect("expiration should create settlement");
     assert_eq!(settlement.reason_code, "DEADLINE_EXPIRED");
     assert_eq!(settlement.poster_refund_usdc, 5_000);
-    assert_eq!(settlement.stake_slashed_usdc, 300);
+    assert_eq!(settlement.stake_slashed_usdc, 500);
 }
 
 #[test]
@@ -137,7 +139,7 @@ fn integration_submitter_must_match_claimer() {
         TaskForestInstruction::ClaimJob(ClaimJobParams {
             job_id: 103,
             claimer: "worker-right".to_string(),
-            stake_usdc: 120,
+            stake_usdc: 500,
             now_epoch_secs: 8_500,
         }),
     )
@@ -155,4 +157,36 @@ fn integration_submitter_must_match_claimer() {
     );
 
     assert_eq!(result, Err(ProtocolError::InvalidClaimant));
+}
+
+#[test]
+fn integration_exposure_cap_blocks_overcommit() {
+    let mut protocol = TaskForestProtocol::new();
+    protocol.policy_mut().max_active_exposure_per_claimer = 6_000;
+
+    seed_job(&mut protocol, 201);
+    seed_job(&mut protocol, 202);
+
+    process_instruction(
+        &mut protocol,
+        TaskForestInstruction::ClaimJob(ClaimJobParams {
+            job_id: 201,
+            claimer: "worker-exp".to_string(),
+            stake_usdc: 500,
+            now_epoch_secs: 8_000,
+        }),
+    )
+    .expect("first claim should pass");
+
+    let second = process_instruction(
+        &mut protocol,
+        TaskForestInstruction::ClaimJob(ClaimJobParams {
+            job_id: 202,
+            claimer: "worker-exp".to_string(),
+            stake_usdc: 500,
+            now_epoch_secs: 8_100,
+        }),
+    );
+
+    assert_eq!(second, Err(ProtocolError::ExposureLimitExceeded));
 }

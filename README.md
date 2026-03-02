@@ -63,6 +63,28 @@ This scaffold is intentionally not fixed to a single verification/execution path
 
 This means Arcium confidential attestations and MagicBlock real-time session receipts can be added without changing the core job lifecycle model.
 
+## Anti-exploit policy controls (implemented)
+
+The protocol includes built-in policy knobs to mitigate common marketplace attacks:
+
+- Weak deterministic-check abuse:
+  - minimum `evidence_refs` required on proof submission
+  - pass settlements can require `verification_ref`
+- Task hoarding:
+  - minimum stake as a percentage of reward (`min_stake_bps`)
+  - maximum concurrent active claims per claimer
+  - maximum active reward exposure per claimer
+- Exit-scam / credit abuse:
+  - exposure caps enforced before claim acceptance
+  - timeout path creates explicit fail settlement with slash semantics
+- Verifier centralization risk:
+  - configurable verifier-approval thresholds
+  - higher approval threshold for high-value settlements
+- Challenge window protection:
+  - minimum delay before pass settlement can finalize
+
+These controls live in `ProtocolPolicy` and can be tuned through `policy_mut()`.
+
 ### Instruction payload format (current scaffold)
 
 Current decoder uses simple pipe-delimited payloads for rapid iteration:
