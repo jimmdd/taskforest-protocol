@@ -136,6 +136,22 @@ Compile checks:
 cargo check
 ```
 
+## Devnet client app
+
+A simple web client lives in `client/` to exercise devnet flows:
+
+- burner keypair + airdrop
+- memo/self-transfer smoke tests
+- `create_job` instruction submission
+
+Run client:
+
+```bash
+cd client
+npm install
+npm run dev
+```
+
 ## Feature-gated Pinocchio entrypoint scaffold
 
 This repo now includes a `bpf-entrypoint` feature that compiles a minimal Pinocchio program entrypoint in:
