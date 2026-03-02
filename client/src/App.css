@@ -52,6 +52,14 @@ input {
   font: inherit;
 }
 
+select {
+  border: 1px solid #c8d7d0;
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  font: inherit;
+  background: #fff;
+}
+
 .grid {
   display: grid;
   gap: 0.55rem;
@@ -91,6 +99,23 @@ code {
 
 .status p {
   margin: 0.4rem 0;
+}
+
+.error {
+  color: #a52222;
+  margin: 0.7rem 0 0;
+}
+
+.identity-card {
+  margin-top: 0.7rem;
+  border: 1px dashed #c0d3ca;
+  border-radius: 10px;
+  padding: 0.7rem;
+  background: #f7fbf9;
+}
+
+.identity-card p {
+  margin: 0.35rem 0;
 }
 
 @media (max-width: 720px) {

@@ -143,6 +143,14 @@ A simple web client lives in `client/` to exercise devnet flows:
 - burner keypair + airdrop
 - memo/self-transfer smoke tests
 - `create_job` instruction submission
+- optional identity adapter linkage (`native`, `8004`, `custom`)
+
+Identity adapter interface lives in:
+
+- `client/src/identity/types.ts`
+- `client/src/identity/adapters.ts`
+
+This keeps external registries optional and prevents protocol lock-in while still enabling 8004 interoperability.
 
 Run client:
 

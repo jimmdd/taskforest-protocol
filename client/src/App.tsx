@@ -10,6 +10,8 @@ import {
   TransactionInstruction,
 } from '@solana/web3.js'
 import { Buffer } from 'buffer'
+import { getIdentityAdapter } from './identity/adapters'
+import type { IdentityProvider, IdentityRecord } from './identity/types'
 import './App.css'
 
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr')
@@ -60,6 +62,10 @@ function App() {
     deadlineEpochSecs: String(Math.floor(Date.now() / 1000) + 3600),
     proofSpecHash: 'proof-spec-devnet-v1',
   })
+  const [identityProvider, setIdentityProvider] = useState<IdentityProvider>('native')
+  const [identityInput, setIdentityInput] = useState('')
+  const [identityError, setIdentityError] = useState('')
+  const [linkedIdentity, setLinkedIdentity] = useState<IdentityRecord | null>(null)
 
   async function refreshBalance() {
     const lamports = await connection.getBalance(burner.publicKey)
@@ -165,6 +171,26 @@ function App() {
     }
   }
 
+  async function linkIdentity() {
+    const adapter = getIdentityAdapter(identityProvider)
+    const validationError = adapter.validate(identityInput)
+    if (validationError) {
+      setIdentityError(validationError)
+      setLinkedIdentity(null)
+      return
+    }
+
+    try {
+      setIdentityError('')
+      const identity = await adapter.resolveIdentity(identityInput)
+      setLinkedIdentity(identity)
+      setStatus(`Linked ${identity.provider} identity`) 
+    } catch (error) {
+      setIdentityError((error as Error).message)
+      setLinkedIdentity(null)
+    }
+  }
+
   return (
     <main className="app">
       <header>
@@ -182,6 +208,43 @@ function App() {
           <button onClick={transferSelfTest}>Self-transfer test</button>
           <button onClick={sendMemo}>Memo test tx</button>
         </div>
+      </section>
+
+      <section className="panel">
+        <h2>Identity adapter (optional)</h2>
+        <p className="hint">Keep TaskForest trust local-first, and optionally link external identities like 8004.</p>
+        <div className="grid">
+          <label>
+            Provider
+            <select value={identityProvider} onChange={(e) => setIdentityProvider(e.target.value as IdentityProvider)}>
+              <option value="native">native</option>
+              <option value="8004">8004</option>
+              <option value="custom">custom</option>
+            </select>
+          </label>
+          <label>
+            Identity reference
+            <input
+              value={identityInput}
+              onChange={(e) => setIdentityInput(e.target.value)}
+              placeholder={identityProvider === 'custom' ? 'custom:worker-xyz' : 'base58 pubkey / asset id'}
+            />
+          </label>
+        </div>
+        <div className="actions">
+          <button onClick={linkIdentity}>Link identity</button>
+        </div>
+        {identityError && <p className="error">{identityError}</p>}
+        {linkedIdentity && (
+          <div className="identity-card">
+            <p><strong>Provider:</strong> {linkedIdentity.provider}</p>
+            <p><strong>ID:</strong> <code>{linkedIdentity.id}</code></p>
+            {linkedIdentity.displayName && <p><strong>Name:</strong> {linkedIdentity.displayName}</p>}
+            {linkedIdentity.metadata && (
+              <p><strong>Metadata:</strong> <code>{JSON.stringify(linkedIdentity.metadata)}</code></p>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="panel">
