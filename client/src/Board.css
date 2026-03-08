@@ -180,6 +180,36 @@
     font-weight: 600;
 }
 
+.desc-input {
+    flex: 1;
+    min-width: 180px;
+    padding: 0.55rem 0.8rem;
+    background: var(--bg-glass);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.85rem;
+    font-family: 'Inter', sans-serif;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.desc-input:focus {
+    border-color: var(--accent);
+}
+
+.desc-input::placeholder {
+    color: var(--text-dim);
+}
+
+.job-desc {
+    font-size: 0.85rem;
+    color: var(--text);
+    margin-bottom: 0.6rem;
+    line-height: 1.4;
+    opacity: 0.85;
+}
+
 /* Job Grid */
 .board-grid {
     display: grid;

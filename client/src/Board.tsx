@@ -56,6 +56,7 @@ export default function Board() {
   const [actionLog, setActionLog] = useState<string[]>([])
   const [acting, setActing] = useState<string | null>(null)
   const [rewardSol, setRewardSol] = useState('0.1')
+  const [jobDesc, setJobDesc] = useState('Summarize this research paper')
 
   const erBurner = useMemo(() => getBurner(), [])
 
@@ -157,19 +158,27 @@ export default function Board() {
         setActing(null)
         return
       }
+      // Hash the description to use as on-chain proof_spec_hash
+      const descBytes = new TextEncoder().encode(jobDesc || 'Task')
+      const hashBuffer = await crypto.subtle.digest('SHA-256', descBytes)
+      const proofSpecHash = Array.from(new Uint8Array(hashBuffer))
+
       // Step 1: Create job (escrow reward)
       const tx = await program.methods
         .initializeJob(
           new anchor.BN(jobId),
           new anchor.BN(rewardLamports),
           new anchor.BN(Math.floor(Date.now() / 1000) + 7200),
-          Array.from({ length: 32 }, () => Math.floor(Math.random() * 256))
+          proofSpecHash
         )
         .accounts({ job: jobPDA, poster: publicKey, systemProgram: SystemProgram.programId })
         .transaction()
 
       const sig = await sendTx(connection, tx)
       log(`✅ Job #${jobId} created (${rewardSol} SOL escrowed) tx:${sig.slice(0, 12)}...`)
+
+      // Save description to localStorage for display
+      localStorage.setItem(`tf_desc_${jobPDA.toBase58()}`, jobDesc || 'Task')
 
       // Step 2: Auto-delegate to open for bidding
       log('Opening job for bidding...')
@@ -359,6 +368,14 @@ export default function Board() {
             <span className="reward-suffix">SOL</span>
           </div>
         </div>
+        <input
+          type="text"
+          className="desc-input"
+          placeholder="Describe the task..."
+          value={jobDesc}
+          onChange={e => setJobDesc(e.target.value)}
+          disabled={!!acting}
+        />
         <button className="board-btn board-btn-refresh" onClick={fetchJobs} disabled={loading}>
           {loading ? '⏳ Loading...' : '🔄 Refresh'}
         </button>
@@ -391,6 +408,13 @@ export default function Board() {
               <div className="job-reward">
                 {(job.reward / LAMPORTS_PER_SOL).toFixed(2)} SOL
               </div>
+
+              {(() => {
+                const desc = localStorage.getItem(`tf_desc_${job.pubkey.toBase58()}`)
+                return desc ? (
+                  <div className="job-desc">{desc}</div>
+                ) : null
+              })()}
 
               <div className="job-details">
                 <div className="job-detail">
