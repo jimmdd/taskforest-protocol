@@ -9,6 +9,7 @@ import '@solana/wallet-adapter-react-ui/styles.css'
 import './index.css'
 import App from './App.tsx'
 import Landing from './Landing.tsx'
+import Board from './Board.tsx'
 
 const L1_RPC = 'https://devnet.helius-rpc.com/?api-key=03ec6518-e398-4917-987a-a9fdf13c881a'
 
@@ -26,6 +27,7 @@ function Root() {
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/pipeline" element={<App />} />
+              <Route path="/board" element={<Board />} />
             </Routes>
           </BrowserRouter>
         </WalletModalProvider>

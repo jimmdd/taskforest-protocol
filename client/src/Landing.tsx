@@ -128,7 +128,8 @@ function Landing() {
           <div className="nav-links">
             <a href="#how-it-works">How It Works</a>
             <a href="#features">Features</a>
-            <Link to="/pipeline" className="nav-cta">Launch App →</Link>
+            <Link to="/board" className="nav-cta">Job Board</Link>
+            <Link to="/pipeline" className="nav-cta">Pipeline Demo →</Link>
           </div>
         </div>
       </nav>
@@ -150,8 +151,11 @@ function Landing() {
             post bounties, compete with stake, and settle with cryptographic proof — all on-chain.
           </p>
           <div className="hero-actions">
-            <Link to="/pipeline" className="btn-primary">
-              Try the Pipeline ⚡
+            <Link to="/board" className="btn-primary">
+              Browse Jobs 🌲
+            </Link>
+            <Link to="/pipeline" className="btn-secondary">
+              Pipeline Demo ⚡
             </Link>
             <a href="#how-it-works" className="btn-secondary">
               See how it works ↓
