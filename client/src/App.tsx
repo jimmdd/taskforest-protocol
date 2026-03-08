@@ -406,19 +406,30 @@ function App() {
   async function sendErTx(erConn: Connection, tx: Transaction): Promise<string> {
     tx.feePayer = erBurner.publicKey
     tx.recentBlockhash = (await erConn.getLatestBlockhash('confirmed')).blockhash
-    return await sendAndConfirmTransaction(erConn, tx, [erBurner], {
-      skipPreflight: true,
-      commitment: 'confirmed',
-    })
+    tx.sign(erBurner)
+    const raw = tx.serialize()
+    const sig = await erConn.sendRawTransaction(raw, { skipPreflight: true })
+    // Poll for confirmation (ER doesn't support standard ws confirm reliably)
+    for (let i = 0; i < 40; i++) {
+      try {
+        const status = await erConn.getSignatureStatus(sig)
+        if (status.value?.confirmationStatus === 'confirmed' || status.value?.confirmationStatus === 'finalized') return sig
+      } catch { /* poll again */ }
+      await new Promise(r => setTimeout(r, 500))
+    }
+    return sig // return even if not confirmed (ER may process it)
   }
 
   async function stepBid(erEndpoint: string): Promise<boolean> {
     if (!jobPDA) return false
     setActiveStep('bidding')
-    addEvent('Placing bid on ER (gasless, burner key)...', 'er')
+    addEvent(`Bid via ER burner: ${erBurner.publicKey.toBase58().slice(0, 8)}...`, 'er')
     const start = Date.now()
     try {
-      const erConn = new Connection(erEndpoint, 'confirmed')
+      const erConn = new Connection(erEndpoint, {
+        commitment: 'confirmed',
+        wsEndpoint: erEndpoint.replace('https://', 'wss://'),
+      })
       const erWallet = {
         publicKey: erBurner.publicKey,
         signTransaction: async (tx: Transaction) => { tx.partialSign(erBurner); return tx },
@@ -437,7 +448,7 @@ function App() {
       setCompletedSteps(prev => new Set([...prev, 'bidding']))
       return true
     } catch (e) {
-      addEvent(`Bid failed: ${(e as Error).message.slice(0, 80)}`, 'error')
+      addEvent(`Bid failed: ${(e as Error).message.slice(0, 200)}`, 'error')
       return false
     }
   }
@@ -448,7 +459,10 @@ function App() {
     addEvent('Closing bidding → commit to L1...', 'er')
     const start = Date.now()
     try {
-      const erConn = new Connection(erEndpoint, 'confirmed')
+      const erConn = new Connection(erEndpoint, {
+        commitment: 'confirmed',
+        wsEndpoint: erEndpoint.replace('https://', 'wss://'),
+      })
       const erWallet = {
         publicKey: erBurner.publicKey,
         signTransaction: async (tx: Transaction) => { tx.partialSign(erBurner); return tx },
@@ -471,7 +485,7 @@ function App() {
       setCompletedSteps(prev => new Set([...prev, 'closing']))
       return true
     } catch (e) {
-      addEvent(`Close failed: ${(e as Error).message.slice(0, 80)}`, 'error')
+      addEvent(`Close failed: ${(e as Error).message.slice(0, 200)}`, 'error')
       return false
     }
   }
