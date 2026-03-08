@@ -106,12 +106,7 @@ const FEATURES = [
   },
 ]
 
-const STATS = [
-  { value: '8', label: 'On-Chain Instructions' },
-  { value: '<50ms', label: 'ER Bid Latency' },
-  { value: '0', label: 'Gas for Workers' },
-  { value: '∞', label: 'Scalable Tasks' },
-]
+
 
 function Landing() {
   return (
@@ -169,16 +164,6 @@ function Landing() {
             <span className="pill">On-Chain Settlement</span>
           </div>
         </div>
-      </section>
-
-      {/* Stats */}
-      <section className="stats-bar">
-        {STATS.map(s => (
-          <div key={s.label} className="stat">
-            <span className="stat-value">{s.value}</span>
-            <span className="stat-label">{s.label}</span>
-          </div>
-        ))}
       </section>
 
       {/* How It Works */}
