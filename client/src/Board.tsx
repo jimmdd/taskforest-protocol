@@ -7,7 +7,7 @@ import {
 } from '@solana/web3.js'
 import * as anchor from '@coral-xyz/anchor'
 import idl from '../../target/idl/taskforest.json'
-import { uploadMetadata, fetchMetadata, hashMetadata } from './pinata'
+import { uploadMetadata, fetchMetadata, hashMetadata, hashMetadataHex } from './pinata'
 import type { TaskMetadata } from './pinata'
 import './Board.css'
 
@@ -112,12 +112,11 @@ export default function Board() {
       parsed.sort((a, b) => b.jobId - a.jobId)
       setJobs(parsed)
 
-      // Fetch metadata from IPFS for all jobs
+      // Fetch metadata from API for all jobs
       for (const job of parsed) {
-        const cidKey = `tf_cid_${job.pubkey.toBase58()}`
-        const cid = localStorage.getItem(cidKey)
-        if (cid) {
-          fetchMetadata(cid).then(meta => {
+        const hashKey = localStorage.getItem(`tf_hash_${job.pubkey.toBase58()}`)
+        if (hashKey) {
+          fetchMetadata(hashKey).then(meta => {
             if (meta) setMetadataMap(prev => ({ ...prev, [job.pubkey.toBase58()]: meta }))
           })
         }
@@ -184,17 +183,16 @@ export default function Board() {
         deadline: Math.floor(Date.now() / 1000) + 7200,
       }
 
-      log('Uploading task metadata to IPFS...')
-      let ipfsCid = ''
+      log('Uploading task metadata...')
+      let metaHash = ''
       try {
-        ipfsCid = await uploadMetadata(metadata)
-        if (ipfsCid) {
-          log(`📄 Metadata on IPFS: ${ipfsCid.slice(0, 16)}...`)
-        } else {
-          log('⚠️ No Pinata JWT — using local-only metadata')
+        metaHash = await uploadMetadata(metadata)
+        if (metaHash) {
+          log(`📄 Metadata stored: ${metaHash.slice(0, 16)}...`)
         }
       } catch (e) {
-        log(`⚠️ IPFS upload failed, continuing with local: ${(e as Error).message.slice(0, 60)}`)
+        log(`⚠️ Upload failed, continuing with local: ${(e as Error).message.slice(0, 60)}`)
+        metaHash = await hashMetadataHex(metadata)
       }
 
       // Hash metadata for on-chain verification
@@ -214,11 +212,9 @@ export default function Board() {
       const sig = await sendTx(connection, tx)
       log(`✅ Job #${jobId} created (${rewardSol} SOL escrowed) tx:${sig.slice(0, 12)}...`)
 
-      // Save CID + metadata locally for display
-      if (ipfsCid) {
-        localStorage.setItem(`tf_cid_${jobPDA.toBase58()}`, ipfsCid)
-      }
-      localStorage.setItem(`tf_desc_${jobPDA.toBase58()}`, jobDesc || 'Task')
+      // Save hash + metadata locally for display
+      localStorage.setItem(`tf_hash_${jobPDA.toBase58()}`, metaHash)
+      localStorage.setItem(`tf_meta_${metaHash}`, JSON.stringify(metadata))
       setMetadataMap(prev => ({ ...prev, [jobPDA.toBase58()]: metadata }))
 
       // Step 2: Auto-delegate to open for bidding
@@ -462,20 +458,15 @@ export default function Board() {
                 const meta = metadataMap[job.pubkey.toBase58()]
                 const desc = meta?.description || localStorage.getItem(`tf_desc_${job.pubkey.toBase58()}`)
                 const title = meta?.title
-                const cid = localStorage.getItem(`tf_cid_${job.pubkey.toBase58()}`)
+                const hash = localStorage.getItem(`tf_hash_${job.pubkey.toBase58()}`)
                 return (
                   <div className="job-meta-block">
                     {title && <div className="job-meta-title">{title}</div>}
                     {desc && <div className="job-desc">{desc}</div>}
-                    {cid && (
-                      <a
-                        className="job-ipfs-link"
-                        href={`https://gateway.pinata.cloud/ipfs/${cid}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        📄 IPFS: {cid.slice(0, 12)}...
-                      </a>
+                    {hash && (
+                      <span className="job-ipfs-link">
+                        🔗 {hash.slice(0, 16)}...
+                      </span>
                     )}
                   </div>
                 )

@@ -21,3 +21,4 @@ client/dist/
 .idea/
 .vscode/
 *.iml
+worker/node_modules

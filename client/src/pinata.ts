@@ -1,4 +1,11 @@
-const PINATA_GATEWAY = 'https://gateway.pinata.cloud/ipfs'
+/**
+ * Metadata storage client.
+ * Uploads/fetches task metadata via the Cloudflare Worker + R2 API.
+ * Falls back to localStorage-only if no API URL is configured.
+ */
+
+// Set this to your deployed Worker URL, or leave empty for local-only mode
+const API_URL = import.meta.env.VITE_METADATA_API || ''
 
 export interface TaskMetadata {
   title: string
@@ -12,55 +19,72 @@ export interface TaskMetadata {
 }
 
 /**
- * Upload task metadata JSON to IPFS via Pinata.
- * Returns the IPFS CID (content identifier).
+ * SHA-256 hash of the metadata JSON as a hex string.
+ */
+export async function hashMetadataHex(metadata: TaskMetadata): Promise<string> {
+  const json = JSON.stringify(metadata)
+  const encoded = new TextEncoder().encode(json)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded)
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+/**
+ * SHA-256 hash as a 32-byte array (for on-chain storage).
+ */
+export async function hashMetadata(metadata: TaskMetadata): Promise<number[]> {
+  const json = JSON.stringify(metadata)
+  const encoded = new TextEncoder().encode(json)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded)
+  return Array.from(new Uint8Array(hashBuffer))
+}
+
+/**
+ * Upload task metadata to R2 via the Worker API.
+ * Returns the content hash (used as the key).
  */
 export async function uploadMetadata(metadata: TaskMetadata): Promise<string> {
-  const jwt = import.meta.env.VITE_PINATA_JWT
-  if (!jwt) {
-    console.warn('VITE_PINATA_JWT not set — falling back to local-only storage')
-    return ''
+  const json = JSON.stringify(metadata)
+  const hash = await hashMetadataHex(metadata)
+
+  if (!API_URL) {
+    console.warn('VITE_METADATA_API not set — using local-only storage')
+    return hash // return hash anyway for localStorage keying
   }
 
-  const res = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${jwt}`,
-    },
-    body: JSON.stringify({
-      pinataContent: metadata,
-      pinataMetadata: {
-        name: `taskforest-${metadata.title.slice(0, 30)}`,
-      },
-    }),
+  const res = await fetch(`${API_URL}/metadata/${hash}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: json,
   })
 
   if (!res.ok) {
     const err = await res.text()
-    throw new Error(`Pinata upload failed: ${err}`)
+    throw new Error(`Upload failed: ${err}`)
   }
 
-  const data = await res.json()
-  return data.IpfsHash as string // e.g. "QmXyz..."
+  return hash
 }
 
 /**
- * Fetch task metadata from IPFS via public gateway.
+ * Fetch task metadata from the Worker API.
  * Uses localStorage as cache to avoid repeated fetches.
  */
-export async function fetchMetadata(cid: string): Promise<TaskMetadata | null> {
-  if (!cid) return null
+export async function fetchMetadata(hash: string): Promise<TaskMetadata | null> {
+  if (!hash) return null
 
   // Check cache first
-  const cacheKey = `tf_ipfs_${cid}`
+  const cacheKey = `tf_meta_${hash}`
   const cached = localStorage.getItem(cacheKey)
   if (cached) {
     try { return JSON.parse(cached) } catch { /* re-fetch */ }
   }
 
+  if (!API_URL) return null
+
   try {
-    const res = await fetch(`${PINATA_GATEWAY}/${cid}`, {
+    const res = await fetch(`${API_URL}/metadata/${hash}`, {
       signal: AbortSignal.timeout(8000),
     })
     if (!res.ok) return null
@@ -70,15 +94,4 @@ export async function fetchMetadata(cid: string): Promise<TaskMetadata | null> {
   } catch {
     return null
   }
-}
-
-/**
- * SHA-256 hash of the metadata JSON, returned as a 32-byte array.
- * This gets stored on-chain for content verification.
- */
-export async function hashMetadata(metadata: TaskMetadata): Promise<number[]> {
-  const json = JSON.stringify(metadata)
-  const encoded = new TextEncoder().encode(json)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded)
-  return Array.from(new Uint8Array(hashBuffer))
 }

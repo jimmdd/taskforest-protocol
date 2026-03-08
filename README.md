@@ -136,6 +136,8 @@ This demonstrates the real use case — one wallet posts a job, another bids on 
 - **Ephemeral Rollups**: MagicBlock SDK for delegation + gasless bidding
 - **Client**: React + TypeScript + Vite
 - **Wallet**: Phantom / Solflare via `@solana/wallet-adapter`
+- **Metadata**: Cloudflare Workers + R2 (content-addressed storage)
+- **Hosting**: Cloudflare Pages (free)
 
 ---
 
@@ -145,12 +147,35 @@ This demonstrates the real use case — one wallet posts a job, another bids on 
 - Node.js 18+
 - Rust + Anchor CLI
 - Solana CLI (devnet)
+- Wrangler CLI (`npm i -g wrangler`) — for Cloudflare deployment
 
-### Install & Run Client
+### Local Development
 ```bash
+# Client
+cd client && npm install && npm run dev
+
+# Worker (optional — works without it in local-only mode)
+cd worker && npm install && npm run dev
+```
+
+### Deploy to Cloudflare (Free)
+
+```bash
+# 1. Login to Cloudflare
+wrangler login
+
+# 2. Create R2 bucket
+wrangler r2 bucket create taskforest-metadata
+
+# 3. Deploy metadata Worker
+cd worker && npm run deploy
+# Note the Worker URL
+
+# 4. Deploy frontend to Pages
 cd client
-npm install
-npm run dev
+echo "VITE_METADATA_API=https://taskforest-api.<you>.workers.dev" > .env
+npm run build
+wrangler pages deploy dist --project-name taskforest
 ```
 
 ### Build & Deploy Program
