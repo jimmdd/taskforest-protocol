@@ -718,4 +718,193 @@ code {
   .event-stream {
     max-height: 260px;
   }
+
+  .escrow-flow {
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .escrow-arrow {
+    transform: rotate(90deg);
+    width: 30px;
+    height: 20px;
+    align-self: center;
+  }
+}
+
+/* ---- Escrow Visualization ---- */
+.escrow-section {
+  margin-bottom: 1.5rem;
+}
+
+.section-heading {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.escrow-flow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 1.2rem;
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+}
+
+.escrow-account {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(10, 18, 28, 0.6);
+  min-width: 130px;
+  transition: all 0.4s ease;
+}
+
+.escrow-account.escrow-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 20px rgba(52, 211, 153, 0.15), 0 0 40px rgba(52, 211, 153, 0.05);
+  transform: scale(1.04);
+}
+
+.escrow-account.escrow-pda {
+  border-color: var(--er-color);
+  background: rgba(251, 191, 36, 0.04);
+}
+
+.escrow-account.escrow-pda.escrow-active {
+  border-color: var(--er-color);
+  box-shadow: 0 0 20px rgba(251, 191, 36, 0.2), 0 0 40px rgba(251, 191, 36, 0.05);
+}
+
+.escrow-icon {
+  font-size: 1.6rem;
+  margin-bottom: 0.3rem;
+}
+
+.escrow-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 0.2rem;
+}
+
+.escrow-balance {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.escrow-balance.accent {
+  color: var(--accent);
+  text-shadow: 0 0 12px var(--accent-glow);
+}
+
+.escrow-sublabel {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  margin-top: 0.2rem;
+}
+
+.escrow-arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 0.6rem;
+  opacity: 0.3;
+  transition: all 0.4s ease;
+}
+
+.escrow-arrow.arrow-active {
+  opacity: 1;
+}
+
+.arrow-label {
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 0.3rem;
+}
+
+.arrow-line {
+  width: 60px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  border-radius: 1px;
+  position: relative;
+}
+
+.escrow-arrow.arrow-active .arrow-line {
+  background: linear-gradient(90deg, var(--accent), var(--er-color), var(--accent));
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: arrowPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes arrowPulse {
+
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+.escrow-legend {
+  display: flex;
+  gap: 1.2rem;
+  justify-content: center;
+  margin-top: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.legend-item.success {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.legend-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.legend-dot.l1 {
+  background: var(--l1-color);
+  box-shadow: 0 0 4px var(--accent-glow);
+}
+
+/* New Job button */
+.btn-new {
+  border-color: var(--er-color) !important;
+  color: var(--er-color) !important;
+}
+
+.btn-new:hover {
+  background: rgba(251, 191, 36, 0.1) !important;
 }

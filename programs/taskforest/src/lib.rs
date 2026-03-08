@@ -60,6 +60,7 @@ pub enum TaskForestError {
 #[derive(Default)]
 pub struct Job {
     pub poster: Pubkey,            // 32
+    pub job_id: u64,               // 8  — unique nonce per poster
     pub reward_lamports: u64,      // 8
     pub deadline: i64,             // 8
     pub proof_spec_hash: [u8; 32], // 32
@@ -75,7 +76,7 @@ pub struct Job {
 }
 
 impl Job {
-    pub const SIZE: usize = 8 + 32 + 8 + 8 + 32 + 1 + 32 + 8 + 8 + 32 + 4 + 32 + 8 + 1;
+    pub const SIZE: usize = 8 + 32 + 8 + 8 + 8 + 32 + 1 + 32 + 8 + 8 + 32 + 4 + 32 + 8 + 1;
 }
 
 /// Settlement archive — captures the final state of a settled job.
@@ -108,6 +109,7 @@ pub mod taskforest {
     /// Create a new job/bounty. Poster deposits reward SOL into the job PDA.
     pub fn initialize_job(
         ctx: Context<InitializeJob>,
+        job_id: u64,
         reward_lamports: u64,
         deadline: i64,
         proof_spec_hash: [u8; 32],
@@ -131,6 +133,7 @@ pub mod taskforest {
 
         let job = &mut ctx.accounts.job;
         job.poster = ctx.accounts.poster.key();
+        job.job_id = job_id;
         job.reward_lamports = reward_lamports;
         job.deadline = deadline;
         job.proof_spec_hash = proof_spec_hash;
@@ -145,7 +148,8 @@ pub mod taskforest {
         job.bump = ctx.bumps.job;
 
         msg!(
-            "Job created: reward={} (escrowed) deadline={}",
+            "Job #{} created: reward={} (escrowed) deadline={}",
+            job_id,
             reward_lamports,
             deadline
         );
@@ -155,6 +159,7 @@ pub mod taskforest {
     /// Delegate job PDA to an Ephemeral Rollup for real-time bidding.
     pub fn delegate_job(ctx: Context<DelegateJob>) -> Result<()> {
         let poster = ctx.accounts.job.poster;
+        let job_id = ctx.accounts.job.job_id;
         let status = ctx.accounts.job.status;
 
         require!(
@@ -165,7 +170,7 @@ pub mod taskforest {
 
         ctx.accounts.delegate_job(
             &ctx.accounts.payer,
-            &[JOB_SEED, poster.as_ref()],
+            &[JOB_SEED, poster.as_ref(), &job_id.to_le_bytes()],
             DelegateConfig {
                 validator: ctx.remaining_accounts.first().map(|acc| acc.key()),
                 ..Default::default()
@@ -474,12 +479,13 @@ pub mod taskforest {
 // --- Account contexts ---
 
 #[derive(Accounts)]
+#[instruction(job_id: u64)]
 pub struct InitializeJob<'info> {
     #[account(
         init,
         payer = poster,
         space = Job::SIZE,
-        seeds = [JOB_SEED, poster.key().as_ref()],
+        seeds = [JOB_SEED, poster.key().as_ref(), &job_id.to_le_bytes()],
         bump
     )]
     pub job: Account<'info, Job>,
@@ -494,7 +500,7 @@ pub struct DelegateJob<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     /// The job PDA to delegate
-    #[account(mut, del, seeds = [JOB_SEED, payer.key().as_ref()], bump = job.bump)]
+    #[account(mut, del, seeds = [JOB_SEED, payer.key().as_ref(), &job.job_id.to_le_bytes()], bump = job.bump)]
     pub job: Account<'info, Job>,
 }
 

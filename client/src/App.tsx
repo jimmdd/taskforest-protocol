@@ -192,16 +192,21 @@ function App() {
   const [activeStep, setActiveStep] = useState<PipelineStep>('idle')
   const [running, setRunning] = useState(false)
   const [completedSteps, setCompletedSteps] = useState<Set<PipelineStep>>(new Set())
+  const [escrowBal, setEscrowBal] = useState<string>('—')
+  const [workerBal, setWorkerBal] = useState<string>('—')
+  const [jobId, setJobId] = useState<number>(() => Math.floor(Math.random() * 2 ** 32))
   const eventIdRef = useRef(0)
   const eventsEndRef = useRef<HTMLDivElement>(null)
 
   const jobPDA = useMemo(() => {
     if (!publicKey) return null
+    const idBuf = Buffer.alloc(8)
+    idBuf.writeBigUInt64LE(BigInt(jobId))
     return PublicKey.findProgramAddressSync(
-      [Buffer.from('job'), publicKey.toBuffer()],
+      [Buffer.from('job'), publicKey.toBuffer(), idBuf],
       PROGRAM_ID
     )[0]
-  }, [publicKey])
+  }, [publicKey, jobId])
 
   const archivePDA = useMemo(() => {
     if (!jobPDA) return null
@@ -210,6 +215,18 @@ function App() {
       PROGRAM_ID
     )[0]
   }, [jobPDA])
+
+  const refreshEscrowBalances = useCallback(async () => {
+    if (!jobPDA) return
+    try {
+      const pdaLamports = await connection.getBalance(jobPDA)
+      setEscrowBal((pdaLamports / LAMPORTS_PER_SOL).toFixed(4))
+    } catch { setEscrowBal('—') }
+    try {
+      const burnerLamports = await connection.getBalance(erBurner.publicKey)
+      setWorkerBal((burnerLamports / LAMPORTS_PER_SOL).toFixed(4))
+    } catch { setWorkerBal('—') }
+  }, [jobPDA, connection])
 
   const addEvent = useCallback((label: string, type: EventEntry['type'], extra?: Partial<EventEntry>) => {
     const entry: EventEntry = {
@@ -325,6 +342,7 @@ function App() {
 
       const tx = await program.methods
         .initializeJob(
+          new anchor.BN(jobId),
           new anchor.BN(0.1 * LAMPORTS_PER_SOL),
           new anchor.BN(Math.floor(Date.now() / 1000) + 3600),
           randomHash()
@@ -333,7 +351,8 @@ function App() {
         .transaction()
 
       const sig = await sendTx(connection, tx)
-      addEvent(`Job created on L1`, 'success', { txHash: sig, ms: Date.now() - start })
+      addEvent(`Job #${jobId} created — 0.1 SOL escrowed`, 'success', { txHash: sig, ms: Date.now() - start })
+      await refreshEscrowBalances()
       setCompletedSteps(prev => new Set([...prev, 'init']))
       return true
     } catch (e) {
@@ -549,6 +568,7 @@ function App() {
 
       const sig = await sendL1WithBurner(tx)
       addEvent(`💎 Stake locked in escrow`, 'success', { txHash: sig, ms: Date.now() - start })
+      await refreshEscrowBalances()
       setCompletedSteps(prev => new Set([...prev, 'staking']))
       return true
     } catch (e) {
@@ -577,6 +597,8 @@ function App() {
 
       const sig = await sendTx(connection, tx)
       addEvent(`✅ Job PASSED — SOL transferred to worker`, 'success', { txHash: sig, ms: Date.now() - start })
+      await refreshEscrowBalances()
+      await refreshBalance()
       setCompletedSteps(prev => new Set([...prev, 'settling']))
       return true
     } catch (e) {
@@ -625,7 +647,7 @@ function App() {
     if (!delegateResult) { setRunning(false); return }
     await new Promise(r => setTimeout(r, 1000))
 
-    const job = await program.account.job.fetch(jobPDA)
+    const job = await (program.account as any).job.fetch(jobPDA)
     const status = job.status as number
     let erEndpoint: string | null = null
 
@@ -758,7 +780,7 @@ function App() {
           </div>
         </div>
         <p className="tagline">
-          Real-time Bounty Pipeline · Solana L1 ↔ MagicBlock ER
+          Trustless Bounty Pipeline · Escrow-Protected · Solana L1 ↔ MagicBlock ER
         </p>
       </header>
 
@@ -799,6 +821,43 @@ function App() {
         </div>
       </section>
 
+      {/* Escrow Visualization */}
+      <section className="escrow-section">
+        <h3 className="section-heading">💰 Escrow Flow</h3>
+        <div className="escrow-flow">
+          <div className={`escrow-account ${activeStep === 'init' ? 'escrow-active' : ''}`}>
+            <div className="escrow-icon">👤</div>
+            <div className="escrow-label">Poster</div>
+            <div className="escrow-balance">{balanceSol} SOL</div>
+            <div className="escrow-sublabel">Pays reward</div>
+          </div>
+          <div className={`escrow-arrow ${completedSteps.has('init') ? 'arrow-active' : ''}`}>
+            <span className="arrow-label">reward →</span>
+            <div className="arrow-line" />
+          </div>
+          <div className={`escrow-account escrow-pda ${(activeStep === 'staking' || activeStep === 'settling') ? 'escrow-active' : ''}`}>
+            <div className="escrow-icon">🔐</div>
+            <div className="escrow-label">Job PDA</div>
+            <div className="escrow-balance accent">{escrowBal} SOL</div>
+            <div className="escrow-sublabel">Escrow vault</div>
+          </div>
+          <div className={`escrow-arrow ${completedSteps.has('settling') ? 'arrow-active' : ''}`}>
+            <span className="arrow-label">→ payout</span>
+            <div className="arrow-line" />
+          </div>
+          <div className={`escrow-account ${activeStep === 'staking' ? 'escrow-active' : ''}`}>
+            <div className="escrow-icon">🤖</div>
+            <div className="escrow-label">Worker</div>
+            <div className="escrow-balance">{workerBal} SOL</div>
+            <div className="escrow-sublabel">Stakes & earns</div>
+          </div>
+        </div>
+        <div className="escrow-legend">
+          <span className="legend-item"><span className="legend-dot l1" />On-chain escrow protects both parties</span>
+          {activeStep === 'complete' && <span className="legend-item success">✅ All SOL transfers verified on L1</span>}
+        </div>
+      </section>
+
       {/* Controls + Event Stream */}
       <div className="bottom-row">
         {/* Controls */}
@@ -820,8 +879,16 @@ function App() {
                   <span className="kv-val accent">{balanceSol} SOL</span>
                 </div>
                 <div className="kv">
+                  <span className="kv-label">job ID</span>
+                  <code className="kv-val dim">#{jobId}</code>
+                </div>
+                <div className="kv">
                   <span className="kv-label">job PDA</span>
                   <code className="kv-val dim">{jobPDA?.toBase58().slice(0, 12)}...</code>
+                </div>
+                <div className="kv">
+                  <span className="kv-label">escrow</span>
+                  <span className="kv-val accent">{escrowBal} SOL</span>
                 </div>
               </div>
 
@@ -829,17 +896,20 @@ function App() {
                 <button className="btn btn-run" onClick={runFullDemo} disabled={running}>
                   {running ? '⏳ Running...' : '▶ Run Full Lifecycle'}
                 </button>
+                <button className="btn btn-sm btn-new" onClick={() => { setJobId(Math.floor(Math.random() * 2 ** 32)); setEvents([]); setCompletedSteps(new Set()); setActiveStep('idle') }} disabled={running}>
+                  🆕 New Job
+                </button>
                 <button className="btn btn-sm" onClick={stepAirdrop} disabled={running}>
                   💧 Airdrop
                 </button>
-                <button className="btn btn-sm" onClick={refreshBalance} disabled={running}>
+                <button className="btn btn-sm" onClick={() => { refreshBalance(); refreshEscrowBalances() }} disabled={running}>
                   🔄 Refresh
                 </button>
               </div>
 
               {activeStep === 'complete' && (
                 <div className="complete-banner">
-                  🎉 Pipeline Complete — All 7 steps executed successfully
+                  🎉 Pipeline Complete — All {PIPELINE_ORDER.length - 2} steps with real SOL escrow
                 </div>
               )}
             </>
