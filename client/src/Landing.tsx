@@ -126,7 +126,7 @@ function Landing() {
         <div className="hero-content">
           <div className="hero-badge">
             <span className="badge-dot" />
-            Built on Solana · Powered by MagicBlock
+            Live on Devnet · Built on Solana · Powered by MagicBlock
           </div>
           <h1 className="hero-title">
             <span className="hero-line-1">A land of opportunities</span>
