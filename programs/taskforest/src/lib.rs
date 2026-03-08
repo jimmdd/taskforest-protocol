@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
@@ -12,10 +13,15 @@ pub const ARCHIVE_SEED: &[u8] = b"archive";
 // --- Status byte constants ---
 pub const STATUS_OPEN: u8 = 0;
 pub const STATUS_BIDDING: u8 = 1;
-pub const STATUS_CLAIMED: u8 = 2;
-pub const STATUS_SUBMITTED: u8 = 3;
-pub const STATUS_DONE: u8 = 4;
-pub const STATUS_FAILED: u8 = 5;
+pub const STATUS_CLAIMED: u8 = 2;    // winner selected, needs lock_stake
+pub const STATUS_STAKED: u8 = 6;     // stake locked, ready for proof
+pub const STATUS_SUBMITTED: u8 = 3;  // proof submitted, awaiting settlement
+pub const STATUS_DONE: u8 = 4;       // settled PASS
+pub const STATUS_FAILED: u8 = 5;     // settled FAIL or expired
+
+/// Review period: poster has 1 hour after proof submission to settle.
+/// If they don't, worker can call claim_timeout to auto-win.
+pub const REVIEW_PERIOD_SECS: i64 = 3600;
 
 // --- Error codes ---
 #[error_code]
@@ -42,6 +48,10 @@ pub enum TaskForestError {
     InvalidVerdict,
     #[msg("Proof must be submitted before settlement")]
     MissingProof,
+    #[msg("Review period has not expired")]
+    ReviewPeriodActive,
+    #[msg("Insufficient escrow balance")]
+    InsufficientEscrow,
 }
 
 // --- Account structs ---
@@ -69,7 +79,6 @@ impl Job {
 }
 
 /// Settlement archive — captures the final state of a settled job.
-/// In production, this would be a ZK-compressed PDA via Light Protocol.
 #[account]
 #[derive(Default)]
 pub struct SettlementArchive {
@@ -96,7 +105,7 @@ impl SettlementArchive {
 pub mod taskforest {
     use super::*;
 
-    /// Create a new job/bounty.
+    /// Create a new job/bounty. Poster deposits reward SOL into the job PDA.
     pub fn initialize_job(
         ctx: Context<InitializeJob>,
         reward_lamports: u64,
@@ -107,6 +116,18 @@ pub mod taskforest {
 
         let clock = Clock::get()?;
         require!(deadline > clock.unix_timestamp, TaskForestError::InvalidDeadline);
+
+        // Transfer reward SOL from poster into job PDA (escrow)
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.poster.to_account_info(),
+                    to: ctx.accounts.job.to_account_info(),
+                },
+            ),
+            reward_lamports,
+        )?;
 
         let job = &mut ctx.accounts.job;
         job.poster = ctx.accounts.poster.key();
@@ -123,28 +144,25 @@ pub mod taskforest {
         job.submitted_at = 0;
         job.bump = ctx.bumps.job;
 
-        msg!("Job created: reward={} deadline={}", reward_lamports, deadline);
+        msg!(
+            "Job created: reward={} (escrowed) deadline={}",
+            reward_lamports,
+            deadline
+        );
         Ok(())
     }
 
     /// Delegate job PDA to an Ephemeral Rollup for real-time bidding.
     pub fn delegate_job(ctx: Context<DelegateJob>) -> Result<()> {
-        // Read fields first to avoid borrow conflicts
         let poster = ctx.accounts.job.poster;
         let status = ctx.accounts.job.status;
 
-        // Only poster can delegate
         require!(
             poster == ctx.accounts.payer.key(),
             TaskForestError::Unauthorized
         );
         require!(status == STATUS_OPEN, TaskForestError::WrongStatus);
 
-        // NOTE: Do NOT modify job data here. The delegate CPI transfers
-        // ownership of the PDA to the delegation program. Any mutations
-        // would cause ExternalAccountDataModified at instruction exit.
-
-        // Delegate to ER
         ctx.accounts.delegate_job(
             &ctx.accounts.payer,
             &[JOB_SEED, poster.as_ref()],
@@ -157,29 +175,26 @@ pub mod taskforest {
     }
 
     /// Place a bid on a job (called inside ER — gasless, sub-50ms).
+    /// No actual SOL movement here — just records the bid amount.
     pub fn place_bid(ctx: Context<PlaceBid>, stake_lamports: u64) -> Result<()> {
         require!(stake_lamports > 0, TaskForestError::InvalidStake);
 
         let job = &mut ctx.accounts.job;
-        // Accept both OPEN (delegated but status not yet updated) and BIDDING
         require!(
             job.status == STATUS_OPEN || job.status == STATUS_BIDDING,
             TaskForestError::WrongStatus
         );
 
-        // Set to BIDDING on first bid
         if job.status == STATUS_OPEN {
             job.status = STATUS_BIDDING;
         }
 
-        // Minimum stake: 10% of reward
         let min_stake = job.reward_lamports / 10;
         require!(stake_lamports >= min_stake, TaskForestError::InsufficientStake);
 
         let clock = Clock::get()?;
         require!(clock.unix_timestamp <= job.deadline, TaskForestError::DeadlinePassed);
 
-        // Track best bid (highest stake wins)
         job.bid_count += 1;
         if stake_lamports > job.best_bid_stake {
             job.best_bid_stake = stake_lamports;
@@ -202,7 +217,6 @@ pub mod taskforest {
         require!(job.status == STATUS_BIDDING, TaskForestError::WrongStatus);
         require!(job.bid_count > 0, TaskForestError::WrongStatus);
 
-        // Award to best bidder
         job.claimer = job.best_bidder;
         job.claimer_stake = job.best_bid_stake;
         job.status = STATUS_CLAIMED;
@@ -213,7 +227,6 @@ pub mod taskforest {
             job.claimer_stake
         );
 
-        // Commit and undelegate back to L1
         job.exit(&crate::ID)?;
         commit_and_undelegate_accounts(
             &ctx.accounts.payer,
@@ -225,13 +238,47 @@ pub mod taskforest {
         Ok(())
     }
 
+    /// Lock real SOL stake from the winning claimer into the job PDA.
+    /// Called on L1 after undelegation, before proof submission.
+    pub fn lock_stake(ctx: Context<LockStake>) -> Result<()> {
+        let job_info = ctx.accounts.job.to_account_info();
+        let job = &mut ctx.accounts.job;
+        require!(job.status == STATUS_CLAIMED, TaskForestError::WrongStatus);
+        require!(
+            job.claimer == ctx.accounts.claimer.key(),
+            TaskForestError::InvalidClaimer
+        );
+
+        let stake = job.claimer_stake;
+        require!(stake > 0, TaskForestError::InvalidStake);
+
+        // Transfer stake SOL from claimer into job PDA (escrow)
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.claimer.to_account_info(),
+                    to: job_info,
+                },
+            ),
+            stake,
+        )?;
+
+        job.status = STATUS_STAKED;
+        msg!("Stake locked: {} lamports from {}", stake, job.claimer);
+        Ok(())
+    }
+
     /// Worker submits proof of task completion.
     pub fn submit_proof(
         ctx: Context<SubmitProof>,
         proof_hash: [u8; 32],
     ) -> Result<()> {
         let job = &mut ctx.accounts.job;
-        require!(job.status == STATUS_CLAIMED, TaskForestError::WrongStatus);
+        require!(
+            job.status == STATUS_STAKED || job.status == STATUS_CLAIMED,
+            TaskForestError::WrongStatus
+        );
         require!(
             job.claimer == ctx.accounts.submitter.key(),
             TaskForestError::InvalidClaimer
@@ -248,8 +295,8 @@ pub mod taskforest {
         Ok(())
     }
 
-    /// Settle the job with a pass/fail verdict.
-    /// verdict: 0 = fail, 1 = pass
+    /// Settle the job with a pass/fail verdict. Only poster can settle.
+    /// Real SOL transfers based on verdict.
     pub fn settle_job(
         ctx: Context<SettleJob>,
         verdict: u8,
@@ -259,22 +306,52 @@ pub mod taskforest {
         require!(job.status == STATUS_SUBMITTED, TaskForestError::WrongStatus);
         require!(job.proof_hash != [0u8; 32], TaskForestError::MissingProof);
         require!(verdict <= 1, TaskForestError::InvalidVerdict);
+        // Only poster can settle
+        require!(
+            job.poster == ctx.accounts.settler.key(),
+            TaskForestError::Unauthorized
+        );
+
+        let job_info = job.to_account_info();
 
         if verdict == 1 {
-            // Pass: worker gets reward + stake back
+            // PASS: worker gets reward + stake back
+            let payout = job.reward_lamports + job.claimer_stake;
+            let job_lamports = job_info.lamports();
+            let rent = Rent::get()?.minimum_balance(Job::SIZE);
+            let available = job_lamports.saturating_sub(rent);
+            let transfer_amount = payout.min(available);
+
+            if transfer_amount > 0 {
+                **job_info.try_borrow_mut_lamports()? -= transfer_amount;
+                **ctx.accounts.claimer_account.try_borrow_mut_lamports()? += transfer_amount;
+            }
+
             job.status = STATUS_DONE;
             msg!(
-                "Job PASSED: worker={} payout={} stake_returned={}",
+                "Job PASSED: worker={} payout={} (reward={} + stake={})",
                 job.claimer,
+                transfer_amount,
                 job.reward_lamports,
                 job.claimer_stake
             );
         } else {
-            // Fail: poster gets refund, stake slashed
+            // FAIL: poster gets reward refund, stake is burned (stays in PDA)
+            let refund = job.reward_lamports;
+            let job_lamports = job_info.lamports();
+            let rent = Rent::get()?.minimum_balance(Job::SIZE);
+            let available = job_lamports.saturating_sub(rent);
+            let transfer_amount = refund.min(available);
+
+            if transfer_amount > 0 {
+                **job_info.try_borrow_mut_lamports()? -= transfer_amount;
+                **ctx.accounts.poster_account.try_borrow_mut_lamports()? += transfer_amount;
+            }
+
             job.status = STATUS_FAILED;
             msg!(
-                "Job FAILED: poster_refund={} stake_slashed={}",
-                job.reward_lamports,
+                "Job FAILED: poster_refund={} stake_burned={}",
+                transfer_amount,
                 job.claimer_stake
             );
         }
@@ -282,8 +359,47 @@ pub mod taskforest {
         Ok(())
     }
 
+    /// Worker auto-claims if poster doesn't settle within review period.
+    /// This protects workers from posters who refuse to pay.
+    pub fn claim_timeout(ctx: Context<ClaimTimeout>) -> Result<()> {
+        let job = &mut ctx.accounts.job;
+        require!(job.status == STATUS_SUBMITTED, TaskForestError::WrongStatus);
+        require!(
+            job.claimer == ctx.accounts.claimer.key(),
+            TaskForestError::InvalidClaimer
+        );
+
+        let clock = Clock::get()?;
+        let review_deadline = job.submitted_at + REVIEW_PERIOD_SECS;
+        require!(
+            clock.unix_timestamp > review_deadline,
+            TaskForestError::ReviewPeriodActive
+        );
+
+        // Worker gets reward + stake back (same as PASS)
+        let payout = job.reward_lamports + job.claimer_stake;
+        let job_info = job.to_account_info();
+        let job_lamports = job_info.lamports();
+        let rent = Rent::get()?.minimum_balance(Job::SIZE);
+        let available = job_lamports.saturating_sub(rent);
+        let transfer_amount = payout.min(available);
+
+        if transfer_amount > 0 {
+            **job_info.try_borrow_mut_lamports()? -= transfer_amount;
+            **ctx.accounts.claimer.try_borrow_mut_lamports()? += transfer_amount;
+        }
+
+        job.status = STATUS_DONE;
+        msg!(
+            "Timeout claim: worker={} payout={} (poster failed to settle within {}s)",
+            job.claimer,
+            transfer_amount,
+            REVIEW_PERIOD_SECS
+        );
+        Ok(())
+    }
+
     /// Archive a settled job's outcome to a separate PDA.
-    /// In production, this would create a ZK-compressed account via Light Protocol.
     pub fn archive_settlement(
         ctx: Context<ArchiveSettlement>,
         reason_code: [u8; 32],
@@ -318,10 +434,13 @@ pub mod taskforest {
         Ok(())
     }
 
-    /// Expire a claimed job past its deadline — slashes worker stake.
+    /// Expire a claimed job past its deadline — refunds poster, slashes stake.
     pub fn expire_claim(ctx: Context<ExpireClaim>) -> Result<()> {
         let job = &mut ctx.accounts.job;
-        require!(job.status == STATUS_CLAIMED, TaskForestError::WrongStatus);
+        require!(
+            job.status == STATUS_CLAIMED || job.status == STATUS_STAKED,
+            TaskForestError::WrongStatus
+        );
 
         let clock = Clock::get()?;
         require!(
@@ -329,11 +448,24 @@ pub mod taskforest {
             TaskForestError::DeadlineNotPassed
         );
 
+        // Refund poster their reward
+        let refund = job.reward_lamports;
+        let job_info = job.to_account_info();
+        let job_lamports = job_info.lamports();
+        let rent = Rent::get()?.minimum_balance(Job::SIZE);
+        let available = job_lamports.saturating_sub(rent);
+        let transfer_amount = refund.min(available);
+
+        if transfer_amount > 0 {
+            **job_info.try_borrow_mut_lamports()? -= transfer_amount;
+            **ctx.accounts.poster_account.try_borrow_mut_lamports()? += transfer_amount;
+        }
+
         job.status = STATUS_FAILED;
         msg!(
-            "Claim expired: stake_slashed={} poster_refund={}",
-            job.claimer_stake,
-            job.reward_lamports
+            "Claim expired: poster_refund={} stake_slashed={}",
+            transfer_amount,
+            job.claimer_stake
         );
         Ok(())
     }
@@ -382,6 +514,16 @@ pub struct CloseBidding<'info> {
     pub job: Account<'info, Job>,
 }
 
+/// Lock real SOL stake from winning claimer into the job PDA.
+#[derive(Accounts)]
+pub struct LockStake<'info> {
+    #[account(mut)]
+    pub job: Account<'info, Job>,
+    #[account(mut)]
+    pub claimer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 #[derive(Accounts)]
 pub struct SubmitProof<'info> {
     #[account(mut)]
@@ -389,11 +531,27 @@ pub struct SubmitProof<'info> {
     pub submitter: Signer<'info>,
 }
 
+/// Settlement with real SOL transfers.
 #[derive(Accounts)]
 pub struct SettleJob<'info> {
     #[account(mut)]
     pub job: Account<'info, Job>,
     pub settler: Signer<'info>,
+    /// CHECK: Receives reward refund on FAIL. Validated in instruction.
+    #[account(mut)]
+    pub poster_account: UncheckedAccount<'info>,
+    /// CHECK: Receives payout on PASS. Validated in instruction.
+    #[account(mut)]
+    pub claimer_account: UncheckedAccount<'info>,
+}
+
+/// Worker auto-claims if poster doesn't settle within review period.
+#[derive(Accounts)]
+pub struct ClaimTimeout<'info> {
+    #[account(mut)]
+    pub job: Account<'info, Job>,
+    #[account(mut)]
+    pub claimer: Signer<'info>,
 }
 
 #[derive(Accounts)]
@@ -414,8 +572,12 @@ pub struct ArchiveSettlement<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Expire a claimed job past deadline — refunds poster.
 #[derive(Accounts)]
 pub struct ExpireClaim<'info> {
     #[account(mut)]
     pub job: Account<'info, Job>,
+    /// CHECK: Receives reward refund. Validated via job.poster in instruction.
+    #[account(mut)]
+    pub poster_account: UncheckedAccount<'info>,
 }

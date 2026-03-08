@@ -45,6 +45,7 @@ type PipelineStep =
   | 'delegate'
   | 'bidding'
   | 'closing'
+  | 'staking'
   | 'proving'
   | 'settling'
   | 'archiving'
@@ -56,6 +57,7 @@ const STEP_META: Record<PipelineStep, { label: string; layer: 'l1' | 'er' | 'don
   delegate: { label: 'Delegate',  layer: 'l1',   icon: '🔗' },
   bidding:  { label: 'Bid',       layer: 'er',   icon: '⚡' },
   closing:  { label: 'Close',     layer: 'er',   icon: '🔒' },
+  staking:  { label: 'Stake',     layer: 'l1',   icon: '💎' },
   proving:  { label: 'Prove',     layer: 'l1',   icon: '📝' },
   settling: { label: 'Settle',    layer: 'l1',   icon: '⚖️' },
   archiving:{ label: 'Archive',   layer: 'l1',   icon: '🗄️' },
@@ -63,7 +65,7 @@ const STEP_META: Record<PipelineStep, { label: string; layer: 'l1' | 'er' | 'don
 }
 
 const PIPELINE_ORDER: PipelineStep[] = [
-  'idle', 'init', 'delegate', 'bidding', 'closing', 'proving', 'settling', 'archiving', 'complete'
+  'idle', 'init', 'delegate', 'bidding', 'closing', 'staking', 'proving', 'settling', 'archiving', 'complete'
 ]
 
 function randomHash(): number[] {
@@ -304,7 +306,7 @@ function App() {
     const start = Date.now()
     try {
       try {
-        const existing = await program.account.job.fetch(jobPDA)
+        const existing = await (program.account as any).job.fetch(jobPDA)
         if (existing) {
           const s = existing.status as number
           addEvent(`Job already exists (status=${s}). Using existing.`, 'info', { ms: Date.now() - start })
@@ -354,7 +356,7 @@ function App() {
         return existingER
       }
 
-      const job = await program.account.job.fetch(jobPDA)
+      const job = await (program.account as any).job.fetch(jobPDA)
       const status = job.status as number
       if (status !== 0) {
         addEvent(`Job status=${status}, skipping delegation`, 'info', { ms: Date.now() - start })
@@ -533,23 +535,52 @@ function App() {
     }
   }
 
-  async function stepSettle(): Promise<boolean> {
-    if (!program || !publicKey || !jobPDA) return false
-    setActiveStep('settling')
-    addEvent('Settling job (PASS)...', 'l1')
+  // Lock real SOL stake from the burner (claimer) into the job PDA
+  async function stepLockStake(): Promise<boolean> {
+    if (!program || !jobPDA) return false
+    setActiveStep('staking')
+    addEvent('Locking stake into escrow (burner = claimer)...', 'l1')
     const start = Date.now()
     try {
       const tx = await program.methods
+        .lockStake()
+        .accounts({ job: jobPDA, claimer: erBurner.publicKey, systemProgram: SystemProgram.programId })
+        .transaction()
+
+      const sig = await sendL1WithBurner(tx)
+      addEvent(`💎 Stake locked in escrow`, 'success', { txHash: sig, ms: Date.now() - start })
+      setCompletedSteps(prev => new Set([...prev, 'staking']))
+      return true
+    } catch (e) {
+      addEvent(`Lock stake failed: ${(e as Error).message.slice(0, 200)}`, 'error')
+      return false
+    }
+  }
+
+  async function stepSettle(): Promise<boolean> {
+    if (!program || !publicKey || !jobPDA) return false
+    setActiveStep('settling')
+    addEvent('Settling job (PASS) — reward to worker...', 'l1')
+    const start = Date.now()
+    try {
+      // Fetch job to get claimer pubkey for the accounts
+      const jobData = await (program.account as any).job.fetch(jobPDA)
+      const tx = await program.methods
         .settleJob(1, randomHash())
-        .accounts({ job: jobPDA, settler: publicKey })
+        .accounts({
+          job: jobPDA,
+          settler: publicKey,
+          posterAccount: publicKey,
+          claimerAccount: jobData.claimer,
+        })
         .transaction()
 
       const sig = await sendTx(connection, tx)
-      addEvent(`✅ Job PASSED`, 'success', { txHash: sig, ms: Date.now() - start })
+      addEvent(`✅ Job PASSED — SOL transferred to worker`, 'success', { txHash: sig, ms: Date.now() - start })
       setCompletedSteps(prev => new Set([...prev, 'settling']))
       return true
     } catch (e) {
-      addEvent(`Settle failed: ${(e as Error).message.slice(0, 80)}`, 'error')
+      addEvent(`Settle failed: ${(e as Error).message.slice(0, 200)}`, 'error')
       return false
     }
   }
@@ -618,7 +649,7 @@ function App() {
       for (let i = 0; i < 24; i++) {
         await new Promise(r => setTimeout(r, 5000))
         try {
-          const check = await program.account.job.fetch(jobPDA)
+          const check = await (program.account as any).job.fetch(jobPDA)
           const s = check.status as number
           if (s >= 2) {
             addEvent(`Job committed to L1 (status=${s}) ✔`, 'l1', { ms: (i + 1) * 5000 })
@@ -639,26 +670,60 @@ function App() {
       setCompletedSteps(prev => new Set([...prev, 'bidding', 'closing']))
     }
 
-    const job2 = await program.account.job.fetch(jobPDA)
-    if ((job2.status as number) === 2) {
+    // Lock stake (status 2 = CLAIMED → 6 = STAKED)
+    const job2 = await (program.account as any).job.fetch(jobPDA)
+    const s2 = job2.status as number
+    if (s2 === 2) {
+      // Fund burner with stake amount + fees so it can lock_stake
+      const stakeAmount = (job2.claimerStake as any).toNumber?.() ?? Number(job2.claimerStake)
+      const fundAmount = stakeAmount + 5_000_000 // stake + 0.005 SOL for fees
+      addEvent(`Funding burner with ${(fundAmount / LAMPORTS_PER_SOL).toFixed(4)} SOL for stake escrow...`, 'l1')
+      try {
+        const fundTx = new Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey!,
+            toPubkey: erBurner.publicKey,
+            lamports: fundAmount,
+          })
+        )
+        await sendTx(connection, fundTx)
+        addEvent('Burner funded ✔', 'success')
+      } catch (e) {
+        addEvent(`Fund burner failed: ${(e as Error).message.slice(0, 200)}`, 'error')
+        setRunning(false); return
+      }
+      await new Promise(r => setTimeout(r, 800))
+      if (!await stepLockStake()) { setRunning(false); return }
+      await new Promise(r => setTimeout(r, 800))
+    } else if (s2 >= 6 || s2 >= 3) {
+      addEvent('Stake already locked', 'info')
+      setCompletedSteps(prev => new Set([...prev, 'staking']))
+    }
+
+    // Prove (status 6 = STAKED or 2 = CLAIMED → 3 = SUBMITTED)
+    const job3 = await (program.account as any).job.fetch(jobPDA)
+    const s3 = job3.status as number
+    if (s3 === 6 || s3 === 2) {
       if (!await stepProve()) { setRunning(false); return }
       await new Promise(r => setTimeout(r, 800))
-    } else if ((job2.status as number) >= 3) {
+    } else if (s3 >= 3) {
       addEvent('Proof already submitted', 'info')
       setCompletedSteps(prev => new Set([...prev, 'proving']))
     }
 
-    const job3 = await program.account.job.fetch(jobPDA)
-    if ((job3.status as number) === 3) {
+    // Settle (status 3 = SUBMITTED → 4 = DONE)
+    const job4 = await (program.account as any).job.fetch(jobPDA)
+    const s4 = job4.status as number
+    if (s4 === 3) {
       if (!await stepSettle()) { setRunning(false); return }
       await new Promise(r => setTimeout(r, 800))
-    } else if ((job3.status as number) >= 4) {
+    } else if (s4 >= 4) {
       addEvent('Job already settled', 'info')
       setCompletedSteps(prev => new Set([...prev, 'settling']))
     }
 
     try {
-      await program.account.settlementArchive.fetch(archivePDA!)
+      await (program.account as any).settlementArchive.fetch(archivePDA!)
       addEvent('Archive already exists', 'info')
       setCompletedSteps(prev => new Set([...prev, 'archiving']))
     } catch {
