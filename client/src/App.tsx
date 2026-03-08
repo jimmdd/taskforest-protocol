@@ -485,12 +485,16 @@ function App() {
     }
   }
 
-  // Send L1 tx signed by the burner keypair (for steps where burner is the authorized signer)
+  // Send L1 tx where Phantom pays fees but burner is also a signer (e.g. as submitter/claimer)
   async function sendL1WithBurner(tx: Transaction): Promise<string> {
-    tx.feePayer = erBurner.publicKey
+    if (!publicKey || !signTransaction) throw new Error('Wallet not connected')
+    // Phantom pays the fee
+    tx.feePayer = publicKey
     tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash
-    tx.sign(erBurner)
-    const raw = tx.serialize()
+    // Burner signs first (as submitter), then Phantom signs (as fee payer)
+    tx.partialSign(erBurner)
+    const phantomSigned = await signTransaction(tx)
+    const raw = phantomSigned.serialize()
     const sig = await connection.sendRawTransaction(raw, { skipPreflight: true })
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Confirmation timeout (30s)')), 30000)
