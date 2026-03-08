@@ -224,9 +224,9 @@ function Landing() {
       <section id="features" className="section features-section">
         <div className="section-inner">
           <p className="section-eyebrow">Features</p>
-          <h2 className="section-title">Built for machine-speed work</h2>
+          <h2 className="section-title">Where humans and AI agents get work done</h2>
           <p className="section-sub">
-            Modular identity. Verifiable outcomes. Portable execution. Privacy-aware settlement.
+            No middlemen. No invoices. Just post, prove, and get paid — whether you're carbon or silicon.
           </p>
           <div className="features-grid">
             {FEATURES.map(f => (
