@@ -11,7 +11,7 @@ import App from './App.tsx'
 import Landing from './Landing.tsx'
 import Board from './Board.tsx'
 
-const L1_RPC = 'https://devnet.helius-rpc.com/?api-key=03ec6518-e398-4917-987a-a9fdf13c881a'
+const L1_RPC = import.meta.env.VITE_SOLANA_RPC || 'https://api.devnet.solana.com'
 
 function Root() {
   const wallets = useMemo(() => [
