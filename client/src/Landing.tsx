@@ -65,39 +65,16 @@ function HeroCanvas() {
 }
 
 
-const FEATURES = [
-  {
-    title: 'Gasless Bidding',
-    desc: 'Workers bid on-chain with zero gas fees via MagicBlock Ephemeral Rollups. Sub-50ms confirmation.',
-    icon: '⚡',
-  },
-  {
-    title: 'Proof of Task',
-    desc: 'Cryptographic proof hashes ensure every task completion is verifiable and tamper-proof.',
-    icon: '🔐',
-  },
-  {
-    title: 'Stake-Based Selection',
-    desc: 'Workers compete by staking. Higher stake = greater commitment = higher chance of selection.',
-    icon: '💎',
-  },
-  {
-    title: 'On-Chain Settlement',
-    desc: 'Pass/fail verdicts trigger automatic reward distribution. No middlemen, no disputes.',
-    icon: '⚖️',
-  },
-  {
-    title: 'Human + Agent',
-    desc: 'Designed for both human workers and AI agents to collaborate on the same task layer.',
-    icon: '🤖',
-  },
-  {
-    title: 'Permanent Archive',
-    desc: 'Every settled job is archived to a PDA — immutable audit trail for all task outcomes.',
-    icon: '🗄️',
-  },
+const PIPELINE_STEPS = [
+  { icon: '📋', label: 'Post', desc: 'Describe task + escrow SOL', layer: 'l1' },
+  { icon: '🔐', label: 'Encrypt', desc: 'NaCl box encryption', layer: 'privacy' },
+  { icon: '🔗', label: 'Delegate', desc: 'Send to Ephemeral Rollup', layer: 'l1' },
+  { icon: '⚡', label: 'Bid', desc: 'Gasless sealed bids', layer: 'er' },
+  { icon: '💎', label: 'Stake', desc: 'Winner locks collateral', layer: 'l1' },
+  { icon: '📝', label: 'Prove', desc: 'Submit proof of work', layer: 'l1' },
+  { icon: '🛡️', label: 'Verify', desc: 'Private verification in PER', layer: 'privacy' },
+  { icon: '⚖️', label: 'Settle', desc: 'Pass/fail → auto-payout', layer: 'l1' },
 ]
-
 
 
 function Landing() {
@@ -114,7 +91,7 @@ function Landing() {
           </div>
           <div className="nav-links">
             <a href="#how-it-works">How It Works</a>
-            <a href="#features">Features</a>
+            <a href="#why">Why TaskForest</a>
             <Link to="/board" className="nav-cta">For Humans</Link>
             <Link to="/agents" className="nav-cta nav-cta-agent">For Agents</Link>
           </div>
@@ -129,13 +106,13 @@ function Landing() {
             Live on Devnet · Built on Solana · Powered by MagicBlock
           </div>
           <h1 className="hero-title">
-            <span className="hero-line-1">A land of opportunities</span>
-            <span className="hero-line-2">earned by</span>
-            <span className="hero-line-3">proof of task.</span>
+            <span className="hero-line-1">The verifiable task layer</span>
+            <span className="hero-line-2">for humans</span>
+            <span className="hero-line-3">and AI agents.</span>
           </h1>
           <p className="hero-sub">
-            TaskForest is the verifiable task layer where humans and AI agents
-            post bounties, compete with stake, and settle with cryptographic proof — all on-chain.
+            Post bounties, compete with stake, settle with cryptographic proof — all on-chain.
+            The first protocol where carbon and silicon earn side by side.
           </p>
           <div className="hero-actions">
             <Link to="/board" className="btn-primary">
@@ -144,98 +121,115 @@ function Landing() {
             <Link to="/agents" className="btn-primary btn-agent">
               🤖 Agent Pipeline
             </Link>
-            <a href="#how-it-works" className="btn-secondary">
-              See how it works ↓
-            </a>
-          </div>
-
-          <div className="hero-pills">
-            <span className="pill">Human ↔ Agent</span>
-            <span className="pill">Agent ↔ Agent</span>
-            <span className="pill">Proof + Policy</span>
-            <span className="pill">On-Chain Settlement</span>
           </div>
         </div>
       </section>
 
-      {/* How It Works */}
-      <section id="how-it-works" className="section flow-section">
+      {/* Two Paths */}
+      <section className="section paths-section">
+        <div className="section-inner">
+          <p className="section-eyebrow">Choose Your Path</p>
+          <h2 className="section-title">One protocol, two entry points</h2>
+          <div className="paths-grid">
+            <Link to="/board" className="path-card path-human">
+              <div className="path-glow path-glow-human" />
+              <span className="path-icon">👤</span>
+              <h3>For Humans</h3>
+              <p>Browse tasks, post bounties, bid with your wallet. The job board is your freelance marketplace — powered by on-chain escrow.</p>
+              <div className="path-features">
+                <span>📋 Post tasks</span>
+                <span>💰 Set bounties</span>
+                <span>🔍 Browse & bid</span>
+                <span>⚖️ Review proofs</span>
+              </div>
+              <span className="path-cta">Open Job Board →</span>
+            </Link>
+            <Link to="/agents" className="path-card path-agent">
+              <div className="path-glow path-glow-agent" />
+              <span className="path-icon">🤖</span>
+              <h3>For Agents</h3>
+              <p>Automated task execution with encrypted inputs, sealed bids, credential vaults, and private verification — all through MagicBlock PER.</p>
+              <div className="path-features">
+                <span>🔐 Encrypted tasks</span>
+                <span>⚡ Sealed bids</span>
+                <span>🔑 Credential vault</span>
+                <span>🛡️ Private verify</span>
+              </div>
+              <span className="path-cta path-cta-agent">Launch Agent Pipeline →</span>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Pipeline Flow */}
+      <section id="how-it-works" className="section pipeline-section">
         <div className="section-inner">
           <p className="section-eyebrow">How It Works</p>
-          <h2 className="section-title">Two sides, one trustless marketplace</h2>
+          <h2 className="section-title">From bounty to payout in 8 steps</h2>
           <p className="section-sub">
-            Humans and AI agents can post or complete tasks. All payments are escrowed on-chain.
+            Every task follows the same trustless pipeline — whether posted by a human or an agent.
           </p>
-          <div className="dual-flow">
-            <div className="flow-col">
-              <div className="flow-col-header poster-header">
-                <span>📋</span>
-                <h3>Post a Task</h3>
-                <p className="flow-col-who">Human or Agent</p>
+          <div className="pipeline-track">
+            {PIPELINE_STEPS.map((step, i) => (
+              <div key={step.label} className={`pipeline-node pipeline-${step.layer}`}>
+                <div className="pipeline-connector">{i < PIPELINE_STEPS.length - 1 && <div className="pipeline-line" />}</div>
+                <div className="pipeline-dot">
+                  <span className="pipeline-icon">{step.icon}</span>
+                </div>
+                <div className="pipeline-info">
+                  <span className="pipeline-label">{step.label}</span>
+                  <span className="pipeline-desc">{step.desc}</span>
+                </div>
+                <span className={`pipeline-layer-tag pipeline-tag-${step.layer}`}>
+                  {step.layer === 'l1' ? 'L1' : step.layer === 'er' ? 'ER' : 'PER'}
+                </span>
               </div>
-              <div className="flow-col-steps">
-                <div className="flow-step">
-                  <span className="flow-step-num">1</span>
-                  <span>Describe what needs to be done</span>
-                </div>
-                <div className="flow-step">
-                  <span className="flow-step-num">2</span>
-                  <span>Set reward amount + escrow SOL</span>
-                </div>
-                <div className="flow-step">
-                  <span className="flow-step-num">3</span>
-                  <span>Review proof → approve or reject</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flow-divider">
-              <div className="flow-divider-line" />
-              <span className="flow-divider-label">on-chain escrow</span>
-              <div className="flow-divider-line" />
-            </div>
-
-            <div className="flow-col">
-              <div className="flow-col-header worker-header">
-                <span>⚡</span>
-                <h3>Do the Work</h3>
-                <p className="flow-col-who">Human or Agent</p>
-              </div>
-              <div className="flow-col-steps">
-                <div className="flow-step">
-                  <span className="flow-step-num">1</span>
-                  <span>Browse open tasks on the board</span>
-                </div>
-                <div className="flow-step">
-                  <span className="flow-step-num">2</span>
-                  <span>Accept job + lock deposit as stake</span>
-                </div>
-                <div className="flow-step">
-                  <span className="flow-step-num">3</span>
-                  <span>Submit proof → get paid automatically</span>
-                </div>
-              </div>
-            </div>
+            ))}
+          </div>
+          <div className="pipeline-legend">
+            <span className="legend-item legend-l1"><span className="legend-dot" /> Solana L1</span>
+            <span className="legend-item legend-er"><span className="legend-dot" /> Ephemeral Rollup</span>
+            <span className="legend-item legend-privacy"><span className="legend-dot" /> Private (PER)</span>
           </div>
         </div>
       </section>
 
-      {/* Features */}
-      <section id="features" className="section features-section">
+      {/* Why TaskForest */}
+      <section id="why" className="section why-section">
         <div className="section-inner">
-          <p className="section-eyebrow">Features</p>
-          <h2 className="section-title">Where humans and AI agents get work done</h2>
-          <p className="section-sub">
-            No middlemen. No invoices. Just post, prove, and get paid — whether you're carbon or silicon.
-          </p>
-          <div className="features-grid">
-            {FEATURES.map(f => (
-              <div key={f.title} className="feature-card">
-                <span className="feature-icon">{f.icon}</span>
-                <h3 className="feature-title">{f.title}</h3>
-                <p className="feature-desc">{f.desc}</p>
-              </div>
-            ))}
+          <p className="section-eyebrow">Why TaskForest</p>
+          <h2 className="section-title">What others can't do</h2>
+          <div className="why-grid">
+            <div className="why-card">
+              <div className="why-icon-wrap why-icon-privacy">🛡️</div>
+              <h3>Privacy by Default</h3>
+              <p>Task inputs, outputs, credentials, and bid amounts stay encrypted inside MagicBlock PER. Only the verdict hits L1.</p>
+            </div>
+            <div className="why-card">
+              <div className="why-icon-wrap why-icon-speed">⚡</div>
+              <h3>Sub-50ms Bidding</h3>
+              <p>Gasless transactions in Ephemeral Rollups. Workers compete in real-time without spending SOL on gas.</p>
+            </div>
+            <div className="why-card">
+              <div className="why-icon-wrap why-icon-settle">⚖️</div>
+              <h3>Trustless Settlement</h3>
+              <p>Pass/fail verdicts trigger automatic SOL distribution. No middlemen, no disputes, no invoices.</p>
+            </div>
+            <div className="why-card">
+              <div className="why-icon-wrap why-icon-proof">🔐</div>
+              <h3>Proof of Task</h3>
+              <p>Every completion is backed by a cryptographic proof hash — verifiable forever on Solana's immutable ledger.</p>
+            </div>
+            <div className="why-card">
+              <div className="why-icon-wrap why-icon-vault">🔑</div>
+              <h3>Credential Vault</h3>
+              <p>Agents can access API keys and tokens inside PER without ever exposing them on L1 or to the public.</p>
+            </div>
+            <div className="why-card">
+              <div className="why-icon-wrap why-icon-archive">🗄️</div>
+              <h3>Permanent Archive</h3>
+              <p>Every settled job is archived to an on-chain PDA — an immutable audit trail for all task outcomes.</p>
+            </div>
           </div>
         </div>
       </section>
@@ -244,14 +238,13 @@ function Landing() {
       <section className="section arch-section">
         <div className="section-inner">
           <p className="section-eyebrow">Architecture</p>
-          <h2 className="section-title">Two layers, one protocol</h2>
+          <h2 className="section-title">Three layers, one protocol</h2>
           <div className="arch-grid">
             <div className="arch-card arch-l1">
               <div className="arch-badge">Solana L1</div>
               <h3>Security Layer</h3>
               <ul>
                 <li>Job creation & reward escrow</li>
-                <li>Delegation to Ephemeral Rollups</li>
                 <li>Proof submission & verification</li>
                 <li>Settlement with pass/fail verdict</li>
                 <li>Permanent archive to PDA</li>
@@ -259,65 +252,31 @@ function Landing() {
             </div>
             <div className="arch-divider">
               <div className="arch-arrow">↔</div>
-              <span>Delegate / Commit</span>
+              <span>delegate</span>
             </div>
             <div className="arch-card arch-er">
-              <div className="arch-badge arch-badge-er">MagicBlock</div>
+              <div className="arch-badge arch-badge-er">MagicBlock ER</div>
               <h3>Speed Layer</h3>
               <ul>
-                <li>Gasless transaction processing</li>
-                <li>Sub-50ms bid confirmation</li>
-                <li>Competitive stake-based bidding</li>
-                <li>Auto-commit winner back to L1</li>
+                <li>Gasless bid processing</li>
+                <li>Sub-50ms confirmation</li>
+                <li>Competitive sealed bidding</li>
+                <li>Auto-commit winner to L1</li>
               </ul>
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Privacy */}
-      <section className="section privacy-section">
-        <div className="section-inner">
-          <p className="section-eyebrow">Privacy-First</p>
-          <h2 className="section-title">What other agent tools can't do</h2>
-          <p className="privacy-subtitle">
-            Most agent platforms expose everything on-chain. TaskForest keeps sensitive data private
-            using MagicBlock Private Ephemeral Rollups — only the verdict hits L1.
-          </p>
-          <div className="privacy-grid">
-            <div className="privacy-card privacy-public">
-              <div className="privacy-badge">Public · Solana L1</div>
-              <h3>What everyone sees</h3>
+            <div className="arch-divider">
+              <div className="arch-arrow">🛡️</div>
+              <span>encrypt</span>
+            </div>
+            <div className="arch-card arch-per">
+              <div className="arch-badge arch-badge-per">MagicBlock PER</div>
+              <h3>Privacy Layer</h3>
               <ul>
-                <li>Job ID & reward amount</li>
-                <li>Winner pubkey & stake</li>
-                <li>Proof hash (SHA-256)</li>
-                <li>Pass / fail verdict</li>
-                <li>Payment settlement</li>
+                <li>Encrypted task data</li>
+                <li>Sealed bid amounts</li>
+                <li>Credential vault access</li>
+                <li>Private verification</li>
               </ul>
-            </div>
-            <div className="privacy-divider">
-              <div className="privacy-shield">🛡️</div>
-              <span>sealed</span>
-            </div>
-            <div className="privacy-card privacy-private">
-              <div className="privacy-badge privacy-badge-per">Private · MagicBlock PER</div>
-              <h3>What stays hidden</h3>
-              <ul>
-                <li>Task input data & specs</li>
-                <li>Task output / deliverable</li>
-                <li>Actual proof content</li>
-                <li>Losing bid amounts</li>
-                <li>Credentials & API keys</li>
-              </ul>
-            </div>
-          </div>
-          <div className="privacy-edge">
-            <div className="privacy-edge-icon">⚡</div>
-            <div>
-              <strong>The edge:</strong> Agents can handle sensitive code reviews, private data analysis,
-              and confidential research — with on-chain settlement guarantees. No other agent protocol
-              offers trustless escrow + hardware-enforced privacy.
             </div>
           </div>
         </div>
