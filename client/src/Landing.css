@@ -245,6 +245,54 @@
     flex-wrap: wrap;
 }
 
+/* ===== HIGHLIGHT BANNER ===== */
+.highlight-banner {
+    position: relative;
+    z-index: 1;
+    border-top: 1px solid rgba(52, 211, 153, 0.1);
+    border-bottom: 1px solid rgba(52, 211, 153, 0.06);
+    background: rgba(13, 17, 23, 0.8);
+}
+
+.highlight-inner {
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    padding: 1.2rem 1.5rem;
+}
+
+.highlight-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    text-align: center;
+}
+
+.highlight-value {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #34d399;
+    letter-spacing: -0.01em;
+}
+
+.highlight-label {
+    font-size: 0.68rem;
+    color: #64748b;
+    font-weight: 500;
+}
+
+.highlight-sep {
+    width: 1px;
+    height: 28px;
+    background: rgba(52, 211, 153, 0.12);
+    flex-shrink: 0;
+}
+
 /* ===== SECTIONS ===== */
 .section {
     position: relative;
@@ -393,108 +441,88 @@
     background: rgba(15, 20, 30, 0.4);
 }
 
-.pipeline-track {
+.pipeline-chain {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 0.5rem;
+    align-items: center;
+    gap: 0;
     margin-top: 2rem;
 }
 
-.pipeline-node {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 1rem 0.8rem;
-    background: rgba(15, 20, 30, 0.6);
-    border: 1px solid rgba(52, 211, 153, 0.1);
-    border-radius: 14px;
-    min-width: 110px;
-    transition: all 0.25s;
-}
-
-.pipeline-node:hover {
-    transform: translateY(-3px);
-    border-color: rgba(52, 211, 153, 0.25);
-}
-
-.pipeline-connector {
-    display: none;
-}
-
-.pipeline-dot {
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
+.pipeline-chain-item {
     display: flex;
     align-items: center;
-    justify-content: center;
-    font-size: 1.2rem;
+    gap: 0;
 }
 
-.pipeline-l1 .pipeline-dot {
-    background: rgba(52, 211, 153, 0.1);
-    border: 1px solid rgba(52, 211, 153, 0.2);
-}
-
-.pipeline-er .pipeline-dot {
-    background: rgba(245, 158, 11, 0.1);
-    border: 1px solid rgba(245, 158, 11, 0.2);
-}
-
-.pipeline-privacy .pipeline-dot {
-    background: rgba(124, 58, 237, 0.1);
-    border: 1px solid rgba(124, 58, 237, 0.2);
-}
-
-.pipeline-icon {
-    font-size: 1.1rem;
-}
-
-.pipeline-info {
-    display: flex;
-    flex-direction: column;
+.chain-node {
+    display: inline-flex;
     align-items: center;
-    gap: 0.15rem;
+    gap: 0.35rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 8px;
+    cursor: default;
+    transition: all 0.2s;
 }
 
-.pipeline-label {
+.chain-node:hover {
+    transform: translateY(-1px);
+}
+
+.chain-l1 {
+    background: rgba(52, 211, 153, 0.08);
+    border: 1px solid rgba(52, 211, 153, 0.15);
+}
+
+.chain-er {
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.15);
+}
+
+.chain-privacy {
+    background: rgba(124, 58, 237, 0.08);
+    border: 1px solid rgba(124, 58, 237, 0.15);
+}
+
+.chain-icon {
+    font-size: 0.9rem;
+}
+
+.chain-label {
+    font-size: 0.75rem;
     font-weight: 700;
-    font-size: 0.8rem;
     color: #e2e8f0;
 }
 
-.pipeline-desc {
-    font-size: 0.65rem;
-    color: #64748b;
-    text-align: center;
-    line-height: 1.3;
+.chain-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
 }
 
-.pipeline-layer-tag {
+.chain-desc {
     font-size: 0.6rem;
-    font-weight: 700;
-    padding: 0.15rem 0.4rem;
-    border-radius: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    color: #64748b;
+    font-weight: 400;
 }
 
-.pipeline-tag-l1 {
-    background: rgba(52, 211, 153, 0.1);
+.chain-l1 .chain-label {
     color: #34d399;
 }
 
-.pipeline-tag-er {
-    background: rgba(245, 158, 11, 0.1);
+.chain-er .chain-label {
     color: #fbbf24;
 }
 
-.pipeline-tag-privacy {
-    background: rgba(124, 58, 237, 0.1);
+.chain-privacy .chain-label {
     color: #a78bfa;
+}
+
+.chain-arrow {
+    color: #334155;
+    font-size: 0.7rem;
+    margin: 0 0.2rem;
 }
 
 .pipeline-legend {
@@ -787,20 +815,5 @@
     .arch-divider {
         flex-direction: row;
         padding: 0.5rem 0;
-    }
-
-    .pipeline-track {
-        flex-direction: column;
-        align-items: center;
-    }
-
-    .pipeline-node {
-        flex-direction: row;
-        min-width: 280px;
-        gap: 0.8rem;
-    }
-
-    .pipeline-info {
-        align-items: flex-start;
     }
 }

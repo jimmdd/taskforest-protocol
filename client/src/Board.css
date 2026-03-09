@@ -597,6 +597,67 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
+/* TTD Badge */
+.ttd-badge {
+    display: inline-block;
+    background: rgba(124, 58, 237, 0.15);
+    color: #a78bfa;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    margin-left: 0.3rem;
+    vertical-align: middle;
+}
+
+/* TTD Preview */
+.ttd-preview-section {
+    margin-top: 0.5rem;
+    border-top: 1px solid rgba(124, 58, 237, 0.08);
+    padding-top: 0.5rem;
+}
+
+.ttd-preview-toggle {
+    background: none;
+    border: none;
+    color: #a78bfa;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0.3rem 0;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.ttd-preview-toggle:hover {
+    color: #c4b5fd;
+}
+
+.ttd-preview-code {
+    background: rgba(10, 14, 20, 0.8);
+    border: 1px solid rgba(124, 58, 237, 0.12);
+    border-radius: 8px;
+    padding: 0.8rem;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.65rem;
+    line-height: 1.5;
+    color: #94a3b8;
+    overflow-x: auto;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-top: 0.4rem;
+}
+
+.ttd-preview-note {
+    font-size: 0.65rem;
+    color: #475569;
+    margin-top: 0.3rem;
+    font-style: italic;
+}
+
 @media (max-width: 768px) {
     .board-grid {
         grid-template-columns: 1fr;

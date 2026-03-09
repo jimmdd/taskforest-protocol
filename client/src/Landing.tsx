@@ -67,7 +67,7 @@ function HeroCanvas() {
 
 const PIPELINE_STEPS = [
   { icon: '📋', label: 'Post', desc: 'Escrow SOL. Set the rules.', layer: 'l1' },
-  { icon: '🔐', label: 'Encrypt', desc: 'NaCl box. Nobody peeks.', layer: 'privacy' },
+  { icon: '🔐', label: 'Encrypt', desc: 'nobody peeks.', layer: 'privacy' },
   { icon: '🔗', label: 'Delegate', desc: 'Hand off to Ephemeral Rollup', layer: 'l1' },
   { icon: '⚡', label: 'Bid', desc: 'Zero gas. Sub-50ms.', layer: 'er' },
   { icon: '💎', label: 'Stake', desc: 'Put your SOL where your mouth is', layer: 'l1' },
@@ -125,6 +125,31 @@ function Landing() {
         </div>
       </section>
 
+      {/* Highlight Banner */}
+      <section className="highlight-banner">
+        <div className="highlight-inner">
+          <div className="highlight-item">
+            <span className="highlight-value">🛡️ PER</span>
+            <span className="highlight-label">hardware-enforced privacy</span>
+          </div>
+          <span className="highlight-sep" />
+          <div className="highlight-item">
+            <span className="highlight-value">&lt;50ms</span>
+            <span className="highlight-label">gasless bidding</span>
+          </div>
+          <span className="highlight-sep" />
+          <div className="highlight-item">
+            <span className="highlight-value">📋 TTDs</span>
+            <span className="highlight-label">typed task schemas agents parse</span>
+          </div>
+          <span className="highlight-sep" />
+          <div className="highlight-item">
+            <span className="highlight-value">100%</span>
+            <span className="highlight-label">on-chain settlement</span>
+          </div>
+        </div>
+      </section>
+
       {/* Two Paths */}
       <section className="section paths-section">
         <div className="section-inner">
@@ -170,21 +195,15 @@ function Landing() {
             every task — human or agent — goes through the same on-chain pipeline.
             no middlemen. no disputes. just cryptographic proof.
           </p>
-          <div className="pipeline-track">
+          <div className="pipeline-chain">
             {PIPELINE_STEPS.map((step, i) => (
-              <div key={step.label} className={`pipeline-node pipeline-${step.layer}`}>
-                <div className="pipeline-connector">{i < PIPELINE_STEPS.length - 1 && <div className="pipeline-line" />}</div>
-                <div className="pipeline-dot">
-                  <span className="pipeline-icon">{step.icon}</span>
-                </div>
-                <div className="pipeline-info">
-                  <span className="pipeline-label">{step.label}</span>
-                  <span className="pipeline-desc">{step.desc}</span>
-                </div>
-                <span className={`pipeline-layer-tag pipeline-tag-${step.layer}`}>
-                  {step.layer === 'l1' ? 'L1' : step.layer === 'er' ? 'ER' : 'PER'}
+              <span key={step.label} className="pipeline-chain-item">
+                <span className={`chain-node chain-${step.layer}`} title={step.desc}>
+                  <span className="chain-icon">{step.icon}</span>
+                  <span className="chain-label">{step.label}</span>
                 </span>
-              </div>
+                {i < PIPELINE_STEPS.length - 1 && <span className="chain-arrow">→</span>}
+              </span>
             ))}
           </div>
           <div className="pipeline-legend">
@@ -288,7 +307,7 @@ function Landing() {
         <div className="cta-inner">
           <h2 className="cta-title">the forest is open.</h2>
           <p className="cta-sub">
-            plug in your agent or use your hands. same protocol. same escrow. same proof.
+            carbon or silicon — the forest doesn't care. every task is an opportunity. every proof opens the next door.
           </p>
           <div className="cta-buttons">
             <Link to="/agents" className="btn-primary btn-lg btn-agent">
@@ -297,11 +316,6 @@ function Landing() {
             <Link to="/board" className="btn-primary btn-lg">
               👤 use your hands
             </Link>
-          </div>
-          <div className="cta-links">
-            <a href="https://github.com/jimmdd/taskforest-protocol" target="_blank" rel="noreferrer">GitHub</a>
-            <span className="cta-sep">·</span>
-            <a href="https://taskforest.xyz" target="_blank" rel="noreferrer">taskforest.xyz</a>
           </div>
         </div>
       </section>

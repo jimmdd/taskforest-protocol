@@ -65,6 +65,13 @@ export default function Board() {
   const [deadlineHours, setDeadlineHours] = useState('2')
   const [metadataMap, setMetadataMap] = useState<Record<string, TaskMetadata>>({})
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [taskType, setTaskType] = useState('freeform')
+  const [showTTDPreview, setShowTTDPreview] = useState(false)
+  // Dynamic TTD fields
+  const [ttdInputUrl, setTtdInputUrl] = useState('')
+  const [ttdLanguage, setTtdLanguage] = useState('typescript')
+  const [ttdFormat, setTtdFormat] = useState('markdown')
+  const [ttdMaxWords, setTtdMaxWords] = useState('500')
 
   const erBurner = useMemo(() => getBurner(), [])
 
@@ -87,6 +94,99 @@ export default function Board() {
       {sig.slice(0, 12)}…
     </a>
   )
+
+  // TTD definitions for task types
+  const TTD_TYPES: Record<string, { label: string; icon: string; ttd_id: string; version: string; inputSchema: Record<string,any>; outputSchema: Record<string,any>; tools: string[]; verifiable_by: string[] }> = {
+    freeform: {
+      label: 'Freeform Task', icon: '📝', ttd_id: 'freeform-v1', version: '1.0',
+      inputSchema: { description: { type: 'string', required: true } },
+      outputSchema: { result: { type: 'string', required: true } },
+      tools: [], verifiable_by: ['human-review'],
+    },
+    'text-summarization': {
+      label: 'Text Summarization', icon: '📄', ttd_id: 'text-summarization-v1', version: '1.0',
+      inputSchema: {
+        source_text: { type: 'string', required: true, max_length: 50000 },
+        format: { type: 'enum', values: ['markdown', 'plaintext', 'json'], default: 'markdown' },
+        max_words: { type: 'integer', default: 500, min: 100, max: 5000 },
+      },
+      outputSchema: {
+        summary: { type: 'string', required: true },
+        key_points: { type: 'string[]', required: false },
+      },
+      tools: ['llm'], verifiable_by: ['llm-judge', 'human-review'],
+    },
+    'code-review': {
+      label: 'Code Review', icon: '🔍', ttd_id: 'code-review-v1', version: '1.0',
+      inputSchema: {
+        repo_url: { type: 'url', required: true },
+        language: { type: 'enum', values: ['rust', 'typescript', 'python', 'solidity', 'go'], default: 'typescript' },
+        focus: { type: 'string', required: false },
+      },
+      outputSchema: {
+        review: { type: 'string', required: true },
+        severity: { type: 'enum', values: ['pass', 'minor', 'major', 'critical'] },
+        suggestions: { type: 'string[]' },
+      },
+      tools: ['llm', 'git'], verifiable_by: ['llm-judge', 'human-review'],
+    },
+    'data-extraction': {
+      label: 'Data Extraction', icon: '📊', ttd_id: 'data-extraction-v1', version: '1.0',
+      inputSchema: {
+        source_url: { type: 'url', required: true },
+        fields: { type: 'string', required: true },
+      },
+      outputSchema: {
+        data: { type: 'object', required: true },
+        confidence: { type: 'float', min: 0, max: 1 },
+      },
+      tools: ['web-scraper', 'llm'], verifiable_by: ['schema-validation', 'human-review'],
+    },
+    'design-task': {
+      label: 'Design Task', icon: '🎨', ttd_id: 'design-task-v1', version: '1.0',
+      inputSchema: {
+        brief: { type: 'string', required: true },
+        style: { type: 'enum', values: ['modern', 'minimal', 'bold', 'playful'], default: 'modern' },
+      },
+      outputSchema: {
+        deliverable_url: { type: 'url', required: true },
+        description: { type: 'string', required: true },
+      },
+      tools: ['design-tool'], verifiable_by: ['human-review'],
+    },
+  }
+
+  // Generate TTD JSON from form state
+  function generateTTD() {
+    const ttdDef = TTD_TYPES[taskType]
+    const ttd: any = {
+      ttd_id: ttdDef.ttd_id,
+      name: ttdDef.label,
+      version: ttdDef.version,
+      input: { ...ttdDef.inputSchema },
+      output: { ...ttdDef.outputSchema },
+      tools_required: ttdDef.tools,
+      verifiable_by: ttdDef.verifiable_by,
+    }
+    // Fill in dynamic values
+    if (taskType === 'text-summarization') {
+      ttd.input.source_text = { ...ttd.input.source_text, value: jobDesc }
+      ttd.input.format = { ...ttd.input.format, value: ttdFormat }
+      ttd.input.max_words = { ...ttd.input.max_words, value: parseInt(ttdMaxWords) }
+    } else if (taskType === 'code-review') {
+      ttd.input.repo_url = { ...ttd.input.repo_url, value: ttdInputUrl }
+      ttd.input.language = { ...ttd.input.language, value: ttdLanguage }
+      ttd.input.focus = { ...ttd.input.focus, value: jobDesc }
+    } else if (taskType === 'data-extraction') {
+      ttd.input.source_url = { ...ttd.input.source_url, value: ttdInputUrl }
+      ttd.input.fields = { ...ttd.input.fields, value: jobDesc }
+    } else if (taskType === 'design-task') {
+      ttd.input.brief = { ...ttd.input.brief, value: jobDesc }
+    } else {
+      ttd.input.description = { ...ttd.input.description, value: jobDesc }
+    }
+    return ttd
+  }
 
   // Fetch all jobs
   const fetchJobs = useCallback(async () => {
@@ -607,8 +707,22 @@ export default function Board() {
       {connected && (
         <section className="board-post-card glass">
           <h3>➕ Post a New Task</h3>
-          <p className="post-note">Title & description are stored off-chain. Reward & deadline go on-chain.</p>
+          <p className="post-note">Human-friendly form → generates a machine-readable TTD that agents can parse and bid on.</p>
           <div className="post-form">
+            {/* Task Type Selector */}
+            <label className="post-label">
+              Task Type <span className="ttd-badge">TTD</span>
+              <select
+                className="post-input post-select"
+                value={taskType}
+                onChange={e => { setTaskType(e.target.value); setJobCategory(e.target.value === 'freeform' ? '' : e.target.value) }}
+                disabled={!!acting}
+              >
+                {Object.entries(TTD_TYPES).map(([key, t]) => (
+                  <option key={key} value={key}>{t.icon} {t.label}</option>
+                ))}
+              </select>
+            </label>
             <label className="post-label">
               Task Title <span className="required">*</span>
               <input
@@ -620,44 +734,82 @@ export default function Board() {
                 disabled={!!acting}
               />
             </label>
-            <label className="post-label">
-              Description <span className="required">*</span>
-              <textarea
-                className="post-input post-textarea"
-                placeholder="e.g. Read the attached paper and provide a 500-word summary covering key findings, methodology, and conclusions."
-                value={jobDesc}
-                onChange={e => setJobDesc(e.target.value)}
-                disabled={!!acting}
-                rows={3}
-              />
-            </label>
+
+            {/* Dynamic TTD-specific fields */}
+            {(taskType === 'code-review' || taskType === 'data-extraction') && (
+              <label className="post-label">
+                {taskType === 'code-review' ? 'Repository URL' : 'Source URL'} <span className="required">*</span>
+                <input
+                  type="url"
+                  className="post-input"
+                  placeholder={taskType === 'code-review' ? 'https://github.com/owner/repo' : 'https://example.com/data'}
+                  value={ttdInputUrl}
+                  onChange={e => setTtdInputUrl(e.target.value)}
+                  disabled={!!acting}
+                />
+              </label>
+            )}
+
+            {taskType === 'code-review' && (
+              <div className="post-row-2col">
+                <label className="post-label">
+                  Language
+                  <select className="post-input post-select" value={ttdLanguage} onChange={e => setTtdLanguage(e.target.value)} disabled={!!acting}>
+                    <option value="typescript">TypeScript</option>
+                    <option value="rust">Rust</option>
+                    <option value="python">Python</option>
+                    <option value="solidity">Solidity</option>
+                    <option value="go">Go</option>
+                  </select>
+                </label>
+                <label className="post-label">
+                  Focus Area <span className="optional">(optional)</span>
+                  <input type="text" className="post-input" placeholder="e.g. security, performance" value={jobDesc} onChange={e => setJobDesc(e.target.value)} disabled={!!acting} />
+                </label>
+              </div>
+            )}
+
+            {taskType === 'text-summarization' && (
+              <>
+                <label className="post-label">
+                  Source Text <span className="required">*</span>
+                  <textarea className="post-input post-textarea" placeholder="Paste the text to summarize..." value={jobDesc} onChange={e => setJobDesc(e.target.value)} disabled={!!acting} rows={3} />
+                </label>
+                <div className="post-row-2col">
+                  <label className="post-label">
+                    Output Format
+                    <select className="post-input post-select" value={ttdFormat} onChange={e => setTtdFormat(e.target.value)} disabled={!!acting}>
+                      <option value="markdown">Markdown</option>
+                      <option value="plaintext">Plain Text</option>
+                      <option value="json">JSON</option>
+                    </select>
+                  </label>
+                  <label className="post-label">
+                    Max Words
+                    <input type="number" className="post-input" value={ttdMaxWords} onChange={e => setTtdMaxWords(e.target.value)} min="100" max="5000" disabled={!!acting} />
+                  </label>
+                </div>
+              </>
+            )}
+
+            {(taskType === 'freeform' || taskType === 'design-task' || taskType === 'data-extraction') && (
+              <label className="post-label">
+                {taskType === 'design-task' ? 'Design Brief' : taskType === 'data-extraction' ? 'Fields to Extract' : 'Description'} <span className="required">*</span>
+                <textarea
+                  className="post-input post-textarea"
+                  placeholder={taskType === 'design-task' ? 'Describe the design you need...' : taskType === 'data-extraction' ? 'e.g. name, email, company, role' : 'Describe the task...'}
+                  value={jobDesc}
+                  onChange={e => setJobDesc(e.target.value)}
+                  disabled={!!acting}
+                  rows={3}
+                />
+              </label>
+            )}
+
             <div className="post-row-2col">
               <label className="post-label">
-                Category <span className="optional">(optional)</span>
-                <select
-                  className="post-input post-select"
-                  value={jobCategory}
-                  onChange={e => setJobCategory(e.target.value)}
-                  disabled={!!acting}
-                >
-                  <option value="">Select category...</option>
-                  <option value="research">📚 Research</option>
-                  <option value="development">💻 Development</option>
-                  <option value="design">🎨 Design</option>
-                  <option value="writing">✍️ Writing</option>
-                  <option value="data">📊 Data Analysis</option>
-                  <option value="testing">🧪 Testing / QA</option>
-                  <option value="other">🔧 Other</option>
-                </select>
-              </label>
-              <label className="post-label">
                 Deadline <span className="required">*</span>
-                <select
-                  className="post-input post-select"
-                  value={deadlineHours}
-                  onChange={e => setDeadlineHours(e.target.value)}
-                  disabled={!!acting}
-                >
+                <select className="post-input post-select" value={deadlineHours} onChange={e => setDeadlineHours(e.target.value)} disabled={!!acting}>
                   <option value="1">1 hour</option>
                   <option value="2">2 hours</option>
                   <option value="6">6 hours</option>
@@ -667,18 +819,18 @@ export default function Board() {
                   <option value="168">1 week</option>
                 </select>
               </label>
+              <label className="post-label">
+                Requirements <span className="optional">(optional)</span>
+                <input
+                  type="text"
+                  className="post-input"
+                  placeholder="e.g. Python, GPT-4 (comma-separated)"
+                  value={jobRequirements}
+                  onChange={e => setJobRequirements(e.target.value)}
+                  disabled={!!acting}
+                />
+              </label>
             </div>
-            <label className="post-label">
-              Requirements <span className="optional">(optional)</span>
-              <input
-                type="text"
-                className="post-input"
-                placeholder="e.g. Python, GPT-4, academic writing (comma-separated)"
-                value={jobRequirements}
-                onChange={e => setJobRequirements(e.target.value)}
-                disabled={!!acting}
-              />
-            </label>
             <div className="post-row">
               <label className="post-label reward-label">
                 Reward <span className="required">*</span>
@@ -698,6 +850,17 @@ export default function Board() {
               <button className="board-btn board-btn-post" onClick={postJob} disabled={!connected || !!acting}>
                 {acting === 'new' ? '⏳ Posting...' : '🚀 Post Task'}
               </button>
+            </div>
+
+            {/* TTD Preview */}
+            <div className="ttd-preview-section">
+              <button className="ttd-preview-toggle" onClick={() => setShowTTDPreview(!showTTDPreview)}>
+                {showTTDPreview ? '▾' : '▸'} Preview TTD Schema <span className="ttd-badge">JSON</span>
+              </button>
+              {showTTDPreview && (
+                <pre className="ttd-preview-code">{JSON.stringify(generateTTD(), null, 2)}</pre>
+              )}
+              <p className="ttd-preview-note">this is the machine-readable schema agents will parse to bid on your task</p>
             </div>
           </div>
         </section>
