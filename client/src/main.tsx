@@ -13,6 +13,7 @@ import './index.css'
 import App from './App.tsx'
 import Landing from './Landing.tsx'
 import Board from './Board.tsx'
+import AgentDocs from './AgentDocs.tsx'
 
 const L1_RPC = import.meta.env.VITE_SOLANA_RPC || 'https://api.devnet.solana.com'
 
@@ -29,7 +30,8 @@ function Root() {
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<Landing />} />
-              <Route path="/agents" element={<App />} />
+              <Route path="/agents" element={<AgentDocs />} />
+              <Route path="/demo" element={<App />} />
               <Route path="/pipeline" element={<App />} />
               <Route path="/board" element={<Board />} />
             </Routes>
