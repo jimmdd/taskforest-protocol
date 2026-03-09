@@ -42,6 +42,8 @@ type EventEntry = {
 type PipelineStep =
   | 'idle'
   | 'init'
+  | 'encrypt'
+  | 'vault'
   | 'delegate'
   | 'bidding'
   | 'closing'
@@ -51,21 +53,23 @@ type PipelineStep =
   | 'archiving'
   | 'complete'
 
-const STEP_META: Record<PipelineStep, { label: string; layer: 'l1' | 'er' | 'done' | 'idle'; icon: string }> = {
-  idle:     { label: 'Ready',     layer: 'idle', icon: '⏳' },
-  init:     { label: 'Create',    layer: 'l1',   icon: '📋' },
-  delegate: { label: 'Delegate',  layer: 'l1',   icon: '🔗' },
-  bidding:  { label: 'Bid',       layer: 'er',   icon: '⚡' },
-  closing:  { label: 'Close',     layer: 'er',   icon: '🔒' },
-  staking:  { label: 'Stake',     layer: 'l1',   icon: '💎' },
-  proving:  { label: 'Prove',     layer: 'l1',   icon: '📝' },
-  settling: { label: 'Settle',    layer: 'l1',   icon: '⚖️' },
-  archiving:{ label: 'Archive',   layer: 'l1',   icon: '🗄️' },
-  complete: { label: 'Done',      layer: 'done', icon: '✅' },
+const STEP_META: Record<PipelineStep, { label: string; layer: 'l1' | 'er' | 'done' | 'idle' | 'privacy'; icon: string }> = {
+  idle:     { label: 'Ready',     layer: 'idle',    icon: '⏳' },
+  init:     { label: 'Create',    layer: 'l1',      icon: '📋' },
+  encrypt:  { label: 'Encrypt',   layer: 'privacy', icon: '🔐' },
+  vault:    { label: 'Vault',     layer: 'privacy', icon: '🔑' },
+  delegate: { label: 'Delegate',  layer: 'l1',      icon: '🔗' },
+  bidding:  { label: 'Bid',       layer: 'er',      icon: '⚡' },
+  closing:  { label: 'Close',     layer: 'er',      icon: '🔒' },
+  staking:  { label: 'Stake',     layer: 'l1',      icon: '💎' },
+  proving:  { label: 'Prove',     layer: 'l1',      icon: '📝' },
+  settling: { label: 'Settle',    layer: 'l1',      icon: '⚖️' },
+  archiving:{ label: 'Archive',   layer: 'l1',      icon: '🗄️' },
+  complete: { label: 'Done',      layer: 'done',    icon: '✅' },
 }
 
 const PIPELINE_ORDER: PipelineStep[] = [
-  'idle', 'init', 'delegate', 'bidding', 'closing', 'staking', 'proving', 'settling', 'archiving', 'complete'
+  'idle', 'init', 'encrypt', 'vault', 'delegate', 'bidding', 'closing', 'staking', 'proving', 'settling', 'archiving', 'complete'
 ]
 
 function randomHash(): number[] {
@@ -90,9 +94,10 @@ function ParticleCanvas({ activeStep }: { activeStep: PipelineStep }) {
     resize()
     window.addEventListener('resize', resize)
 
-    const colors = {
+    const colors: Record<string, string[]> = {
       l1: ['#34d399', '#10b981', '#6ee7b7'],
       er: ['#f59e0b', '#fbbf24', '#fcd34d'],
+      privacy: ['#a855f7', '#c084fc', '#e9d5ff'],
       done: ['#8b5cf6', '#a78bfa', '#c4b5fd'],
       idle: ['#475569', '#64748b', '#94a3b8'],
     }
@@ -328,11 +333,11 @@ function App() {
           const s = existing.status as number
           addEvent(`Job already exists (status=${s}). Using existing.`, 'info', { ms: Date.now() - start })
           if (s === 4 || s === 5) {
-            setCompletedSteps(prev => new Set([...prev, 'init', 'delegate', 'bidding', 'closing', 'proving', 'settling']))
+            setCompletedSteps(prev => new Set([...prev, 'init', 'encrypt', 'vault', 'delegate', 'bidding', 'closing', 'proving', 'settling']))
             return true
           }
           if (s >= 2) {
-            setCompletedSteps(prev => new Set([...prev, 'init', 'delegate', 'bidding', 'closing']))
+            setCompletedSteps(prev => new Set([...prev, 'init', 'encrypt', 'vault', 'delegate', 'bidding', 'closing']))
             return true
           }
           setCompletedSteps(prev => new Set([...prev, 'init']))
@@ -345,13 +350,16 @@ function App() {
           new anchor.BN(jobId),
           new anchor.BN(0.1 * LAMPORTS_PER_SOL),
           new anchor.BN(Math.floor(Date.now() / 1000) + 3600),
-          randomHash()
+          randomHash(),
+          Array.from({ length: 32 }, () => 0), // ttd_hash — zero = untyped demo
+          1,                                     // privacy_level = encrypted
+          randomHash()                           // mock encryption pubkey
         )
         .accounts({ job: jobPDA, poster: publicKey, systemProgram: SystemProgram.programId })
         .transaction()
 
       const sig = await sendTx(connection, tx)
-      addEvent(`Job #${jobId} created — 0.1 SOL escrowed`, 'success', { txHash: sig, ms: Date.now() - start })
+      addEvent(`Job #${jobId} created — 0.1 SOL escrowed (privacy: encrypted)`, 'success', { txHash: sig, ms: Date.now() - start })
       await refreshEscrowBalances()
       setCompletedSteps(prev => new Set([...prev, 'init']))
       return true
@@ -359,6 +367,43 @@ function App() {
       addEvent(`Create failed: ${(e as Error).message.slice(0, 80)}`, 'error')
       return false
     }
+  }
+
+  async function stepEncrypt(): Promise<boolean> {
+    setActiveStep('encrypt')
+    const start = Date.now()
+    addEvent('🔐 Encrypting task data with NaCl box...', 'info')
+    
+    // Simulate encryption (in production this would be real NaCl box)
+    await new Promise(r => setTimeout(r, 800))
+    
+    const plaintext = 'Summarize the Q4 2025 earnings report for Solana Foundation'
+    const encryptedPreview = 'YWVz...x3Fk=' // simulated
+    
+    addEvent(`📄 Plaintext: "${plaintext.slice(0, 40)}..."`, 'info')
+    await new Promise(r => setTimeout(r, 400))
+    addEvent(`🔒 Encrypted: ${encryptedPreview} (NaCl box, X25519)`, 'success', { ms: Date.now() - start })
+    addEvent('📦 Encrypted payload → IPFS (only hash stored on L1)', 'info')
+    
+    setCompletedSteps(prev => new Set([...prev, 'encrypt']))
+    return true
+  }
+
+  async function stepVault(): Promise<boolean> {
+    if (!program || !publicKey || !jobPDA) return false
+    setActiveStep('vault')
+    const start = Date.now()
+    addEvent('🔑 Storing credential in encrypted vault...', 'info')
+    
+    // Simulate credential vault storage
+    await new Promise(r => setTimeout(r, 600))
+    
+    addEvent('🔑 API key: sk-***...***f8a (encrypted with NaCl)', 'info')
+    addEvent('📍 Vault PDA delegated to PER — credential accessible only inside rollup', 'success', { ms: Date.now() - start })
+    addEvent('🛡️ L1 sees only: vault_hash=a3f2...9b1c', 'info')
+    
+    setCompletedSteps(prev => new Set([...prev, 'vault']))
+    return true
   }
 
   async function stepDelegate(): Promise<string | false> {
@@ -641,6 +686,12 @@ function App() {
     await refreshBalance()
 
     if (!await stepInit()) { setRunning(false); return }
+    await new Promise(r => setTimeout(r, 800))
+
+    if (!await stepEncrypt()) { setRunning(false); return }
+    await new Promise(r => setTimeout(r, 600))
+
+    if (!await stepVault()) { setRunning(false); return }
     await new Promise(r => setTimeout(r, 800))
 
     const delegateResult = await stepDelegate()

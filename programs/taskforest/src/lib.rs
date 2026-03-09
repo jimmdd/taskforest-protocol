@@ -9,6 +9,8 @@ declare_id!("Fgiye795epSDkytp6a334Y2AwjqdGDecWV24yc2neZ4s");
 pub const JOB_SEED: &[u8] = b"job";
 pub const BID_SEED: &[u8] = b"bid";
 pub const ARCHIVE_SEED: &[u8] = b"archive";
+pub const TTD_SEED: &[u8] = b"ttd";
+pub const VAULT_SEED: &[u8] = b"vault";
 
 // --- Status byte constants ---
 pub const STATUS_OPEN: u8 = 0;
@@ -18,6 +20,11 @@ pub const STATUS_STAKED: u8 = 6;     // stake locked, ready for proof
 pub const STATUS_SUBMITTED: u8 = 3;  // proof submitted, awaiting settlement
 pub const STATUS_DONE: u8 = 4;       // settled PASS
 pub const STATUS_FAILED: u8 = 5;     // settled FAIL or expired
+
+// --- Privacy levels ---
+pub const PRIVACY_PUBLIC: u8 = 0;
+pub const PRIVACY_ENCRYPTED: u8 = 1;
+pub const PRIVACY_PER: u8 = 2;
 
 /// Review period: poster has 1 hour after proof submission to settle.
 /// If they don't, worker can call claim_timeout to auto-win.
@@ -52,6 +59,8 @@ pub enum TaskForestError {
     ReviewPeriodActive,
     #[msg("Insufficient escrow balance")]
     InsufficientEscrow,
+    #[msg("TTD URI exceeds maximum length")]
+    UriTooLong,
 }
 
 // --- Account structs ---
@@ -60,10 +69,15 @@ pub enum TaskForestError {
 #[derive(Default)]
 pub struct Job {
     pub poster: Pubkey,            // 32
-    pub job_id: u64,               // 8  — unique nonce per poster
+    pub job_id: u64,               // 8
     pub reward_lamports: u64,      // 8
     pub deadline: i64,             // 8
     pub proof_spec_hash: [u8; 32], // 32
+    pub ttd_hash: [u8; 32],        // 32
+    pub privacy_level: u8,         // 1  — 0=public, 1=encrypted, 2=per
+    pub encryption_pubkey: [u8; 32], // 32 — poster's X25519 pubkey for encrypted jobs
+    pub encrypted_input_hash: [u8; 32],  // 32 — hash of encrypted input (IPFS CID)
+    pub encrypted_output_hash: [u8; 32], // 32 — hash of encrypted output
     pub status: u8,                // 1
     pub claimer: Pubkey,           // 32
     pub claimer_stake: u64,        // 8
@@ -76,7 +90,39 @@ pub struct Job {
 }
 
 impl Job {
-    pub const SIZE: usize = 8 + 32 + 8 + 8 + 8 + 32 + 1 + 32 + 8 + 8 + 32 + 4 + 32 + 8 + 1;
+    // Updated size with privacy fields: +1 (privacy_level) +32 (encryption_pubkey) +32 (encrypted_input_hash) +32 (encrypted_output_hash)
+    pub const SIZE: usize = 8 + 32 + 8 + 8 + 8 + 32 + 32 + 1 + 32 + 32 + 32 + 1 + 32 + 8 + 8 + 32 + 4 + 32 + 8 + 1;
+}
+
+/// Credential Vault — encrypted credentials accessible only inside PER.
+#[account]
+pub struct CredentialVault {
+    pub poster: Pubkey,              // 32 — who created this vault
+    pub job: Pubkey,                 // 32 — associated job
+    pub encrypted_cred_hash: [u8; 32], // 32 — hash of encrypted credential (stored off-chain)
+    pub is_active: bool,             // 1  — cleared after job settles
+    pub bump: u8,                    // 1
+}
+
+impl CredentialVault {
+    pub const SIZE: usize = 8 + 32 + 32 + 32 + 1 + 1;
+}
+
+/// Task Type Definition — registered on-chain schema for typed agent tasks.
+#[account]
+pub struct TaskTypeDefinition {
+    pub creator: Pubkey,        // 32 — who registered this TTD
+    pub ttd_hash: [u8; 32],     // 32 — SHA-256 of the full TTD JSON
+    pub ttd_uri: String,        // 4 + len — where to fetch it (IPFS/R2/Arweave)
+    pub version: u16,           // 2  — version number
+    pub created_at: i64,        // 8
+    pub bump: u8,               // 1
+}
+
+impl TaskTypeDefinition {
+    pub const MAX_URI_LEN: usize = 128;
+    // discriminator + creator + ttd_hash + string_prefix + max_uri + version + created_at + bump
+    pub const SIZE: usize = 8 + 32 + 32 + (4 + Self::MAX_URI_LEN) + 2 + 8 + 1;
 }
 
 /// Settlement archive — captures the final state of a settled job.
@@ -106,13 +152,47 @@ impl SettlementArchive {
 pub mod taskforest {
     use super::*;
 
+    /// Register a Task Type Definition on-chain.
+    /// Anyone can register — open registry. TTD JSON stored off-chain at ttd_uri.
+    pub fn register_ttd(
+        ctx: Context<RegisterTtd>,
+        ttd_hash: [u8; 32],
+        ttd_uri: String,
+        version: u16,
+    ) -> Result<()> {
+        require!(
+            ttd_uri.len() <= TaskTypeDefinition::MAX_URI_LEN,
+            TaskForestError::UriTooLong
+        );
+
+        let ttd = &mut ctx.accounts.ttd;
+        ttd.creator = ctx.accounts.creator.key();
+        ttd.ttd_hash = ttd_hash;
+        ttd.ttd_uri = ttd_uri;
+        ttd.version = version;
+        ttd.created_at = Clock::get()?.unix_timestamp;
+        ttd.bump = ctx.bumps.ttd;
+
+        msg!(
+            "TTD registered: hash={:?} version={}",
+            &ttd_hash[..4],
+            version
+        );
+        Ok(())
+    }
+
     /// Create a new job/bounty. Poster deposits reward SOL into the job PDA.
+    /// privacy_level: 0=public, 1=encrypted, 2=per
+    /// encryption_pubkey: poster's X25519 pubkey (all zeros for public jobs)
     pub fn initialize_job(
         ctx: Context<InitializeJob>,
         job_id: u64,
         reward_lamports: u64,
         deadline: i64,
         proof_spec_hash: [u8; 32],
+        ttd_hash: [u8; 32],
+        privacy_level: u8,
+        encryption_pubkey: [u8; 32],
     ) -> Result<()> {
         require!(reward_lamports > 0, TaskForestError::InvalidReward);
 
@@ -137,6 +217,11 @@ pub mod taskforest {
         job.reward_lamports = reward_lamports;
         job.deadline = deadline;
         job.proof_spec_hash = proof_spec_hash;
+        job.ttd_hash = ttd_hash;
+        job.privacy_level = privacy_level;
+        job.encryption_pubkey = encryption_pubkey;
+        job.encrypted_input_hash = [0u8; 32];
+        job.encrypted_output_hash = [0u8; 32];
         job.status = STATUS_OPEN;
         job.claimer = Pubkey::default();
         job.claimer_stake = 0;
@@ -148,10 +233,11 @@ pub mod taskforest {
         job.bump = ctx.bumps.job;
 
         msg!(
-            "Job #{} created: reward={} (escrowed) deadline={}",
+            "Job #{} created: reward={} privacy={} ttd={:?}",
             job_id,
             reward_lamports,
-            deadline
+            privacy_level,
+            &ttd_hash[..4]
         );
         Ok(())
     }
@@ -474,9 +560,150 @@ pub mod taskforest {
         );
         Ok(())
     }
+
+    /// Expire an unclaimed job past its deadline — refunds poster's escrowed SOL.
+    /// Works for STATUS_OPEN and STATUS_BIDDING (no winner was selected).
+    pub fn expire_unclaimed(ctx: Context<ExpireUnclaimed>) -> Result<()> {
+        let job = &mut ctx.accounts.job;
+        require!(
+            job.status == STATUS_OPEN || job.status == STATUS_BIDDING,
+            TaskForestError::WrongStatus
+        );
+        require!(
+            job.poster == ctx.accounts.poster.key(),
+            TaskForestError::Unauthorized
+        );
+
+        let clock = Clock::get()?;
+        require!(
+            clock.unix_timestamp > job.deadline,
+            TaskForestError::DeadlineNotPassed
+        );
+
+        // Refund poster their escrowed reward
+        let refund = job.reward_lamports;
+        let job_info = job.to_account_info();
+        let job_lamports = job_info.lamports();
+        let rent = Rent::get()?.minimum_balance(Job::SIZE);
+        let available = job_lamports.saturating_sub(rent);
+        let transfer_amount = refund.min(available);
+
+        if transfer_amount > 0 {
+            **job_info.try_borrow_mut_lamports()? -= transfer_amount;
+            **ctx.accounts.poster.try_borrow_mut_lamports()? += transfer_amount;
+        }
+
+        job.status = STATUS_FAILED;
+        msg!(
+            "Unclaimed job expired: refund={} bids={}",
+            transfer_amount,
+            job.bid_count
+        );
+        Ok(())
+    }
+
+    /// Extend the deadline of an open/bidding job. Only the poster can call this.
+    pub fn extend_deadline(ctx: Context<ExtendDeadline>, new_deadline: i64) -> Result<()> {
+        let job = &mut ctx.accounts.job;
+        require!(
+            job.status == STATUS_OPEN || job.status == STATUS_BIDDING,
+            TaskForestError::WrongStatus
+        );
+        require!(
+            job.poster == ctx.accounts.poster.key(),
+            TaskForestError::Unauthorized
+        );
+
+        let clock = Clock::get()?;
+        require!(new_deadline > clock.unix_timestamp, TaskForestError::InvalidDeadline);
+
+        let old = job.deadline;
+        job.deadline = new_deadline;
+        msg!("Deadline extended: {} -> {}", old, new_deadline);
+        Ok(())
+    }
+
+    /// Store an encrypted credential hash in the vault (actual credential off-chain).
+    /// Vault PDA is delegated to PER alongside job for access during execution.
+    pub fn store_credential(
+        ctx: Context<StoreCredential>,
+        encrypted_cred_hash: [u8; 32],
+    ) -> Result<()> {
+        let vault = &mut ctx.accounts.vault;
+        vault.poster = ctx.accounts.poster.key();
+        vault.job = ctx.accounts.job.key();
+        vault.encrypted_cred_hash = encrypted_cred_hash;
+        vault.is_active = true;
+        vault.bump = ctx.bumps.vault;
+
+        msg!("Credential stored for job: hash={:?}", &encrypted_cred_hash[..4]);
+        Ok(())
+    }
+
+    /// Clear credential vault after job settles.
+    pub fn clear_credential(ctx: Context<ClearCredential>) -> Result<()> {
+        let vault = &mut ctx.accounts.vault;
+        require!(
+            ctx.accounts.poster.key() == vault.poster,
+            TaskForestError::Unauthorized
+        );
+        vault.is_active = false;
+        vault.encrypted_cred_hash = [0u8; 32];
+        msg!("Credential vault cleared");
+        Ok(())
+    }
+
+    /// Submit encrypted proof — stores encrypted output hash on-chain.
+    /// Actual encrypted output stored off-chain (IPFS).
+    pub fn submit_encrypted_proof(
+        ctx: Context<SubmitProof>,
+        proof_hash: [u8; 32],
+        encrypted_output_hash: [u8; 32],
+    ) -> Result<()> {
+        let job = &mut ctx.accounts.job;
+        require!(
+            job.status == STATUS_CLAIMED || job.status == STATUS_STAKED,
+            TaskForestError::WrongStatus
+        );
+        require!(
+            job.claimer == ctx.accounts.submitter.key(),
+            TaskForestError::Unauthorized
+        );
+
+        let clock = Clock::get()?;
+        require!(clock.unix_timestamp <= job.deadline, TaskForestError::DeadlineNotPassed);
+
+        job.proof_hash = proof_hash;
+        job.encrypted_output_hash = encrypted_output_hash;
+        job.submitted_at = clock.unix_timestamp;
+        job.status = STATUS_SUBMITTED;
+
+        msg!(
+            "Encrypted proof submitted: hash={:?} output={:?}",
+            &proof_hash[..4],
+            &encrypted_output_hash[..4]
+        );
+        Ok(())
+    }
 }
 
 // --- Account contexts ---
+
+#[derive(Accounts)]
+#[instruction(ttd_hash: [u8; 32])]
+pub struct RegisterTtd<'info> {
+    #[account(
+        init,
+        payer = creator,
+        space = TaskTypeDefinition::SIZE,
+        seeds = [TTD_SEED, creator.key().as_ref(), &ttd_hash],
+        bump
+    )]
+    pub ttd: Account<'info, TaskTypeDefinition>,
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
 
 #[derive(Accounts)]
 #[instruction(job_id: u64)]
@@ -586,4 +813,46 @@ pub struct ExpireClaim<'info> {
     /// CHECK: Receives reward refund. Validated via job.poster in instruction.
     #[account(mut)]
     pub poster_account: UncheckedAccount<'info>,
+}
+
+/// Expire an unclaimed job past deadline — poster reclaims SOL.
+#[derive(Accounts)]
+pub struct ExpireUnclaimed<'info> {
+    #[account(mut)]
+    pub job: Account<'info, Job>,
+    #[account(mut)]
+    pub poster: Signer<'info>,
+}
+
+/// Extend deadline of an open/bidding job.
+#[derive(Accounts)]
+pub struct ExtendDeadline<'info> {
+    #[account(mut)]
+    pub job: Account<'info, Job>,
+    pub poster: Signer<'info>,
+}
+
+/// Store encrypted credential in vault PDA.
+#[derive(Accounts)]
+pub struct StoreCredential<'info> {
+    #[account(
+        init,
+        payer = poster,
+        space = CredentialVault::SIZE,
+        seeds = [VAULT_SEED, poster.key().as_ref(), job.key().as_ref()],
+        bump
+    )]
+    pub vault: Account<'info, CredentialVault>,
+    pub job: Account<'info, Job>,
+    #[account(mut)]
+    pub poster: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Clear credential vault after settlement.
+#[derive(Accounts)]
+pub struct ClearCredential<'info> {
+    #[account(mut)]
+    pub vault: Account<'info, CredentialVault>,
+    pub poster: Signer<'info>,
 }
