@@ -1,3 +1,6 @@
+import { Buffer } from 'buffer'
+;(window as any).Buffer = Buffer
+
 import { useMemo } from 'react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
