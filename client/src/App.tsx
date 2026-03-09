@@ -345,7 +345,8 @@ function App() {
           new anchor.BN(jobId),
           new anchor.BN(0.1 * LAMPORTS_PER_SOL),
           new anchor.BN(Math.floor(Date.now() / 1000) + 3600),
-          randomHash()
+          randomHash(),
+          Array.from({ length: 32 }, () => 0) // ttd_hash — zero = untyped demo
         )
         .accounts({ job: jobPDA, poster: publicKey, systemProgram: SystemProgram.programId })
         .transaction()

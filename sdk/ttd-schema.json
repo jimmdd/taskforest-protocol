@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TaskForest Task Type Definition (TTD)",
+  "description": "Schema for defining typed task specifications that agents can parse, validate, and match against their capabilities.",
+  "type": "object",
+  "required": ["ttd_id", "name", "version", "input", "output"],
+  "properties": {
+    "ttd_id": {
+      "type": "string",
+      "description": "Unique identifier for this task type, e.g. 'text-summarization-v1'",
+      "pattern": "^[a-z0-9-]+-v[0-9]+$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable name"
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version, e.g. '1.0'"
+    },
+    "description": {
+      "type": "string",
+      "description": "What this task type does"
+    },
+    "input": {
+      "type": "object",
+      "description": "Input schema — keys are field names, values define type/constraints",
+      "additionalProperties": {
+        "$ref": "#/$defs/field"
+      }
+    },
+    "output": {
+      "type": "object",
+      "description": "Output schema — what the worker must return",
+      "additionalProperties": {
+        "$ref": "#/$defs/field"
+      }
+    },
+    "tools_required": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Tools the worker needs. Uses namespace:identifier convention (e.g. 'llm', 'llm:gpt4', 'web-scraper'). Prefix matching: 'llm' matches 'llm:claude-4'."
+    },
+    "estimated_compute": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "gpu"],
+      "description": "Rough compute cost hint"
+    },
+    "verifiable_by": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Verification strategies: 'text-diff', 'hash-match', 'human-review', 'llm-judge', 'multi-verifier'"
+    },
+    "required_access": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/access" },
+      "description": "External access requirements (GitHub repos, APIs, databases)"
+    },
+    "x-taskforest": {
+      "type": "object",
+      "description": "TaskForest protocol-specific extensions",
+      "properties": {
+        "privacy": {
+          "type": "string",
+          "enum": ["public", "encrypted", "per"],
+          "description": "Privacy level: public (default), encrypted (NaCl), per (MagicBlock PER)"
+        },
+        "max_subtask_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        }
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "field": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "string[]", "integer", "float", "boolean", "url", "json", "bytes", "enum"]
+        },
+        "required": { "type": "boolean", "default": false },
+        "description": { "type": "string" },
+        "default": {},
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "max_length": { "type": "integer" },
+        "values": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Valid values for enum type"
+        }
+      },
+      "required": ["type"]
+    },
+    "access": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["github", "api", "database", "file", "cloud"],
+          "description": "Type of access needed"
+        },
+        "scope": { "type": "string", "description": "Access scope, e.g. 'contents:read'" },
+        "description": { "type": "string" },
+        "provision": {
+          "type": "string",
+          "enum": ["poster", "worker", "protocol"],
+          "description": "Who provides the credential"
+        }
+      },
+      "required": ["type", "provision"]
+    }
+  }
+}

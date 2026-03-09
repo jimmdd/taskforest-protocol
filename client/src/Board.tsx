@@ -217,7 +217,8 @@ export default function Board() {
           new anchor.BN(jobId),
           new anchor.BN(rewardLamports),
           new anchor.BN(deadlineSec),
-          proofSpecHash
+          proofSpecHash,
+          Array.from({ length: 32 }, () => 0) // ttd_hash — zero = untyped
         )
         .accounts({ job: jobPDA, poster: publicKey, systemProgram: SystemProgram.programId })
         .transaction()

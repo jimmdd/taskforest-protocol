@@ -11,11 +11,20 @@ describe("taskforest", () => {
 
   const program = anchor.workspace.Taskforest as Program<Taskforest>;
   const poster = provider.wallet;
+  const JOB_ID = new BN(1); // consistent job_id for tests
 
-  // Helper: derive Job PDA
-  function findJobPda(posterKey: PublicKey): [PublicKey, number] {
+  // Helper: derive Job PDA (includes job_id)
+  function findJobPda(posterKey: PublicKey, jobId: BN = JOB_ID): [PublicKey, number] {
     return PublicKey.findProgramAddressSync(
-      [Buffer.from("job"), posterKey.toBuffer()],
+      [Buffer.from("job"), posterKey.toBuffer(), jobId.toArrayLike(Buffer, "le", 8)],
+      program.programId
+    );
+  }
+
+  // Helper: derive TTD PDA
+  function findTtdPda(creatorKey: PublicKey, ttdHash: number[]): [PublicKey, number] {
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from("ttd"), creatorKey.toBuffer(), Buffer.from(ttdHash)],
       program.programId
     );
   }
@@ -35,17 +44,67 @@ describe("taskforest", () => {
     return Array.from({ length: 32 }, () => Math.floor(Math.random() * 256));
   }
 
+  // Helper: zero hash (untyped job)
+  function zeroHash(): number[] {
+    return Array.from({ length: 32 }, () => 0);
+  }
+
   // ===== TDD: Tests written first, program must satisfy these =====
 
+  describe("register_ttd", () => {
+    it("registers a TTD with correct fields", async () => {
+      const ttdHash = randomHash();
+      const [ttdPda] = findTtdPda(poster.publicKey, ttdHash);
+      const uri = "ipfs://QmTestHash123";
+
+      await program.methods
+        .registerTtd(ttdHash, uri, 1)
+        .accounts({
+          ttd: ttdPda,
+          creator: poster.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+      const ttd = await program.account.taskTypeDefinition.fetch(ttdPda);
+      expect(ttd.creator.toBase58()).to.equal(poster.publicKey.toBase58());
+      expect(ttd.ttdHash).to.deep.equal(ttdHash);
+      expect(ttd.ttdUri).to.equal(uri);
+      expect(ttd.version).to.equal(1);
+      expect(ttd.createdAt.toNumber()).to.be.greaterThan(0);
+    });
+
+    it("rejects URI that is too long", async () => {
+      const ttdHash = randomHash();
+      const [ttdPda] = findTtdPda(poster.publicKey, ttdHash);
+      const longUri = "x".repeat(200);
+
+      try {
+        await program.methods
+          .registerTtd(ttdHash, longUri, 1)
+          .accounts({
+            ttd: ttdPda,
+            creator: poster.publicKey,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+        expect.fail("should have thrown");
+      } catch (err: any) {
+        expect(err.toString()).to.include("UriTooLong");
+      }
+    });
+  });
+
   describe("initialize_job", () => {
-    it("creates a job with correct fields", async () => {
+    it("creates a job with correct fields and TTD hash", async () => {
       const [jobPda] = findJobPda(poster.publicKey);
       const reward = new BN(1_000_000); // 0.001 SOL
       const deadline = futureDeadline();
       const specHash = randomHash();
+      const ttdHash = randomHash();
 
       await program.methods
-        .initializeJob(reward, deadline, specHash)
+        .initializeJob(JOB_ID, reward, deadline, specHash, ttdHash)
         .accounts({
           job: jobPda,
           poster: poster.publicKey,
@@ -60,25 +119,25 @@ describe("taskforest", () => {
       expect(job.status).to.equal(0); // STATUS_OPEN
       expect(job.bidCount).to.equal(0);
       expect(job.bestBidStake.toNumber()).to.equal(0);
+      expect(job.ttdHash).to.deep.equal(ttdHash);
     });
 
     it("rejects zero reward", async () => {
-      // Need a different poster to get a different PDA
       const fakePoster = anchor.web3.Keypair.generate();
       
-      // Airdrop to the fake poster
       const sig = await provider.connection.requestAirdrop(
         fakePoster.publicKey,
         2 * LAMPORTS_PER_SOL
       );
       await provider.connection.confirmTransaction(sig);
 
-      const [jobPda] = findJobPda(fakePoster.publicKey);
+      const fakeJobId = new BN(99);
+      const [jobPda] = findJobPda(fakePoster.publicKey, fakeJobId);
       const specHash = randomHash();
 
       try {
         await program.methods
-          .initializeJob(new BN(0), futureDeadline(), specHash)
+          .initializeJob(fakeJobId, new BN(0), futureDeadline(), specHash, zeroHash())
           .accounts({
             job: jobPda,
             poster: fakePoster.publicKey,
@@ -171,7 +230,7 @@ describe("taskforest", () => {
       );
       await provider.connection.confirmTransaction(sig);
 
-      [archiveJobPda] = findJobPda(archivePoster.publicKey);
+      [archiveJobPda] = findJobPda(archivePoster.publicKey, new BN(50));
       [archivePda] = PublicKey.findProgramAddressSync(
         [Buffer.from("archive"), archiveJobPda.toBuffer()],
         program.programId
@@ -179,7 +238,7 @@ describe("taskforest", () => {
 
       // Create a job
       await program.methods
-        .initializeJob(new BN(500_000), futureDeadline(), randomHash())
+        .initializeJob(new BN(50), new BN(500_000), futureDeadline(), randomHash(), zeroHash())
         .accounts({
           job: archiveJobPda,
           poster: archivePoster.publicKey,

@@ -9,6 +9,7 @@ declare_id!("Fgiye795epSDkytp6a334Y2AwjqdGDecWV24yc2neZ4s");
 pub const JOB_SEED: &[u8] = b"job";
 pub const BID_SEED: &[u8] = b"bid";
 pub const ARCHIVE_SEED: &[u8] = b"archive";
+pub const TTD_SEED: &[u8] = b"ttd";
 
 // --- Status byte constants ---
 pub const STATUS_OPEN: u8 = 0;
@@ -52,6 +53,8 @@ pub enum TaskForestError {
     ReviewPeriodActive,
     #[msg("Insufficient escrow balance")]
     InsufficientEscrow,
+    #[msg("TTD URI exceeds maximum length")]
+    UriTooLong,
 }
 
 // --- Account structs ---
@@ -64,6 +67,7 @@ pub struct Job {
     pub reward_lamports: u64,      // 8
     pub deadline: i64,             // 8
     pub proof_spec_hash: [u8; 32], // 32
+    pub ttd_hash: [u8; 32],        // 32 — Task Type Definition hash
     pub status: u8,                // 1
     pub claimer: Pubkey,           // 32
     pub claimer_stake: u64,        // 8
@@ -76,7 +80,25 @@ pub struct Job {
 }
 
 impl Job {
-    pub const SIZE: usize = 8 + 32 + 8 + 8 + 8 + 32 + 1 + 32 + 8 + 8 + 32 + 4 + 32 + 8 + 1;
+    // +32 for ttd_hash
+    pub const SIZE: usize = 8 + 32 + 8 + 8 + 8 + 32 + 32 + 1 + 32 + 8 + 8 + 32 + 4 + 32 + 8 + 1;
+}
+
+/// Task Type Definition — registered on-chain schema for typed agent tasks.
+#[account]
+pub struct TaskTypeDefinition {
+    pub creator: Pubkey,        // 32 — who registered this TTD
+    pub ttd_hash: [u8; 32],     // 32 — SHA-256 of the full TTD JSON
+    pub ttd_uri: String,        // 4 + len — where to fetch it (IPFS/R2/Arweave)
+    pub version: u16,           // 2  — version number
+    pub created_at: i64,        // 8
+    pub bump: u8,               // 1
+}
+
+impl TaskTypeDefinition {
+    pub const MAX_URI_LEN: usize = 128;
+    // discriminator + creator + ttd_hash + string_prefix + max_uri + version + created_at + bump
+    pub const SIZE: usize = 8 + 32 + 32 + (4 + Self::MAX_URI_LEN) + 2 + 8 + 1;
 }
 
 /// Settlement archive — captures the final state of a settled job.
@@ -106,13 +128,44 @@ impl SettlementArchive {
 pub mod taskforest {
     use super::*;
 
+    /// Register a Task Type Definition on-chain.
+    /// Anyone can register — open registry. TTD JSON stored off-chain at ttd_uri.
+    pub fn register_ttd(
+        ctx: Context<RegisterTtd>,
+        ttd_hash: [u8; 32],
+        ttd_uri: String,
+        version: u16,
+    ) -> Result<()> {
+        require!(
+            ttd_uri.len() <= TaskTypeDefinition::MAX_URI_LEN,
+            TaskForestError::UriTooLong
+        );
+
+        let ttd = &mut ctx.accounts.ttd;
+        ttd.creator = ctx.accounts.creator.key();
+        ttd.ttd_hash = ttd_hash;
+        ttd.ttd_uri = ttd_uri;
+        ttd.version = version;
+        ttd.created_at = Clock::get()?.unix_timestamp;
+        ttd.bump = ctx.bumps.ttd;
+
+        msg!(
+            "TTD registered: hash={:?} version={}",
+            &ttd_hash[..4],
+            version
+        );
+        Ok(())
+    }
+
     /// Create a new job/bounty. Poster deposits reward SOL into the job PDA.
+    /// Optionally references a TTD via ttd_hash (all zeros = untyped/legacy job).
     pub fn initialize_job(
         ctx: Context<InitializeJob>,
         job_id: u64,
         reward_lamports: u64,
         deadline: i64,
         proof_spec_hash: [u8; 32],
+        ttd_hash: [u8; 32],
     ) -> Result<()> {
         require!(reward_lamports > 0, TaskForestError::InvalidReward);
 
@@ -137,6 +190,7 @@ pub mod taskforest {
         job.reward_lamports = reward_lamports;
         job.deadline = deadline;
         job.proof_spec_hash = proof_spec_hash;
+        job.ttd_hash = ttd_hash;
         job.status = STATUS_OPEN;
         job.claimer = Pubkey::default();
         job.claimer_stake = 0;
@@ -148,10 +202,11 @@ pub mod taskforest {
         job.bump = ctx.bumps.job;
 
         msg!(
-            "Job #{} created: reward={} (escrowed) deadline={}",
+            "Job #{} created: reward={} (escrowed) deadline={} ttd={:?}",
             job_id,
             reward_lamports,
-            deadline
+            deadline,
+            &ttd_hash[..4]
         );
         Ok(())
     }
@@ -477,6 +532,22 @@ pub mod taskforest {
 }
 
 // --- Account contexts ---
+
+#[derive(Accounts)]
+#[instruction(ttd_hash: [u8; 32])]
+pub struct RegisterTtd<'info> {
+    #[account(
+        init,
+        payer = creator,
+        space = TaskTypeDefinition::SIZE,
+        seeds = [TTD_SEED, creator.key().as_ref(), &ttd_hash],
+        bump
+    )]
+    pub ttd: Account<'info, TaskTypeDefinition>,
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
 
 #[derive(Accounts)]
 #[instruction(job_id: u64)]

@@ -1,0 +1,32 @@
+{
+  "ttd_id": "code-review-v1",
+  "name": "Code Review",
+  "version": "1.0",
+  "description": "Review source code for bugs, security issues, and best practices. Provide actionable feedback.",
+  "input": {
+    "source_code": { "type": "string", "required": true, "max_length": 100000, "description": "Source code to review" },
+    "language": { "type": "string", "required": true, "description": "Programming language (e.g. 'rust', 'typescript')" },
+    "focus": { "type": "enum", "values": ["security", "performance", "correctness", "style", "all"], "default": "all" },
+    "context": { "type": "string", "required": false, "description": "Additional context about the codebase or PR" }
+  },
+  "output": {
+    "issues": { "type": "json", "required": true, "description": "Array of {line, severity, message, suggestion}" },
+    "summary": { "type": "string", "required": true, "description": "Overall assessment" },
+    "score": { "type": "integer", "min": 0, "max": 100, "description": "Code quality score" },
+    "confidence": { "type": "float", "min": 0, "max": 1 }
+  },
+  "tools_required": ["llm"],
+  "estimated_compute": "medium",
+  "verifiable_by": ["llm-judge", "human-review"],
+  "required_access": [
+    {
+      "type": "github",
+      "scope": "contents:read",
+      "description": "Read access to the target repository",
+      "provision": "poster"
+    }
+  ],
+  "x-taskforest": {
+    "privacy": "encrypted"
+  }
+}

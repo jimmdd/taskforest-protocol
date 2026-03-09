@@ -1,0 +1,23 @@
+{
+  "ttd_id": "text-summarization-v1",
+  "name": "Text Summarization",
+  "version": "1.0",
+  "description": "Summarize a text document into a concise output with key points.",
+  "input": {
+    "source_text": { "type": "string", "required": true, "max_length": 50000, "description": "The text to summarize" },
+    "source_url": { "type": "url", "required": false, "description": "URL to fetch text from (alternative to source_text)" },
+    "format": { "type": "enum", "values": ["markdown", "plaintext", "json"], "default": "markdown" },
+    "max_words": { "type": "integer", "default": 500, "min": 100, "max": 5000 }
+  },
+  "output": {
+    "summary": { "type": "string", "required": true, "description": "The summarized text" },
+    "key_points": { "type": "string[]", "required": false, "description": "Bullet-point key takeaways" },
+    "confidence": { "type": "float", "min": 0, "max": 1, "description": "Agent's confidence in the summary quality" }
+  },
+  "tools_required": ["llm"],
+  "estimated_compute": "low",
+  "verifiable_by": ["text-diff", "llm-judge", "human-review"],
+  "x-taskforest": {
+    "privacy": "public"
+  }
+}
