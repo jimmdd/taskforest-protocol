@@ -92,12 +92,13 @@ export default function Board() {
   const fetchJobs = useCallback(async () => {
     setLoading(true)
     try {
-      // Fetch both old (222) and new (254, with ttd_hash) Job account sizes
-      const [oldAccounts, newAccounts] = await Promise.all([
+      // Fetch old (222), TTD-era (254), and privacy-era (351) Job account sizes
+      const [v1Accounts, v2Accounts, v3Accounts] = await Promise.all([
         connection.getProgramAccounts(PROGRAM_ID, { filters: [{ dataSize: 222 }] }),
         connection.getProgramAccounts(PROGRAM_ID, { filters: [{ dataSize: 254 }] }),
+        connection.getProgramAccounts(PROGRAM_ID, { filters: [{ dataSize: 351 }] }),
       ])
-      const accounts = [...oldAccounts, ...newAccounts]
+      const accounts = [...v1Accounts, ...v2Accounts, ...v3Accounts]
 
       const parsed: JobOnChain[] = []
       for (const { pubkey, account } of accounts) {
