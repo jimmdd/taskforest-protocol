@@ -206,6 +206,26 @@ pub struct CompressedTtd {
     pub created_at: i64,          // 8
 }
 
+/// Compressed Job — finished job data stored rent-free after settlement.
+/// The original Job PDA is closed and rent reclaimed by the poster.
+#[derive(
+    Clone, Debug, Default, BorshSerialize, BorshDeserialize, LightDiscriminator,
+)]
+pub struct CompressedJob {
+    pub poster: Pubkey,              // 32
+    pub job_id: u64,                 // 8
+    pub reward_lamports: u64,        // 8
+    pub deadline: i64,               // 8
+    pub ttd_hash: [u8; 32],          // 32
+    pub privacy_level: u8,           // 1
+    pub status: u8,                  // 1
+    pub claimer: Pubkey,             // 32
+    pub claimer_stake: u64,          // 8
+    pub proof_hash: [u8; 32],        // 32
+    pub submitted_at: i64,           // 8
+    pub compressed_at: i64,          // 8 — when this was compressed
+}
+
 // --- Program instructions ---
 
 #[ephemeral]
@@ -907,6 +927,84 @@ pub mod taskforest {
         msg!("Compressed TTD registered: hash={:?} v={}", &ttd_hash[..4], version);
         Ok(())
     }
+
+    /// Compress finished job data into a Merkle leaf and close the PDA to reclaim rent.
+    /// Only callable after settlement (status = DONE or FAILED).
+    pub fn compress_finished_job<'info>(
+        ctx: Context<'_, '_, '_, 'info, CompressedJobAccounts<'info>>,
+        proof: ValidityProof,
+        address_tree_info: PackedAddressTreeInfo,
+        output_state_tree_index: u8,
+    ) -> Result<()> {
+        let job = &ctx.accounts.job;
+        require!(
+            job.status == STATUS_DONE || job.status == STATUS_FAILED,
+            TaskForestError::WrongStatus
+        );
+
+        let clock = Clock::get()?;
+
+        let light_cpi_accounts = LightCpiAccounts::new(
+            ctx.accounts.poster.as_ref(),
+            ctx.remaining_accounts,
+            crate::LIGHT_CPI_SIGNER,
+        );
+
+        let job_key = ctx.accounts.job.key();
+        let (address, address_seed) = light_sdk::address::v1::derive_address(
+            &[b"compressed_job", job_key.as_ref()],
+            &address_tree_info
+                .get_tree_pubkey(&light_cpi_accounts)
+                .map_err(|_| ErrorCode::AccountNotEnoughKeys)?,
+            &crate::ID,
+        );
+
+        let mut compressed = LightAccount::<CompressedJob>::new_init(
+            &crate::ID,
+            Some(address),
+            output_state_tree_index,
+        );
+        compressed.poster = job.poster;
+        compressed.job_id = job.job_id;
+        compressed.reward_lamports = job.reward_lamports;
+        compressed.deadline = job.deadline;
+        compressed.ttd_hash = job.ttd_hash;
+        compressed.privacy_level = job.privacy_level;
+        compressed.status = job.status;
+        compressed.claimer = job.claimer;
+        compressed.claimer_stake = job.claimer_stake;
+        compressed.proof_hash = job.proof_hash;
+        compressed.submitted_at = job.submitted_at;
+        compressed.compressed_at = clock.unix_timestamp;
+
+        LightSystemProgramCpi::new_cpi(LIGHT_CPI_SIGNER, proof)
+            .with_light_account(compressed)
+            .map_err(|_| TaskForestError::WrongStatus)?
+            .with_new_addresses(&[address_tree_info.into_new_address_params_assigned_packed(address_seed, Some(output_state_tree_index))])
+            .invoke(light_cpi_accounts)
+            .map_err(|_| TaskForestError::WrongStatus)?;
+
+        // Close the Job PDA — transfer all lamports back to poster (rent reclaim)
+        let job_account_info = ctx.accounts.job.to_account_info();
+        let poster_account_info = ctx.accounts.poster.to_account_info();
+        let job_lamports = job_account_info.lamports();
+
+        **job_account_info.try_borrow_mut_lamports()? = 0;
+        **poster_account_info.try_borrow_mut_lamports()? = poster_account_info
+            .lamports()
+            .checked_add(job_lamports)
+            .ok_or(TaskForestError::WrongStatus)?;
+
+        // Zero out the data to mark as closed
+        job_account_info.data.borrow_mut().fill(0);
+
+        msg!(
+            "Job compressed & PDA closed: job={} reclaimed={} lamports",
+            job_key,
+            job_lamports
+        );
+        Ok(())
+    }
 }
 
 // --- Account contexts ---
@@ -1102,4 +1200,15 @@ pub struct AgentReputationAccounts<'info> {
 pub struct CompressedTtdAccounts<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
+}
+
+/// Context for compressing finished job data and closing the PDA.
+#[derive(Accounts)]
+pub struct CompressedJobAccounts<'info> {
+    /// The poster who created the job — receives rent refund.
+    #[account(mut)]
+    pub poster: Signer<'info>,
+    /// The finished Job PDA to compress and close.
+    #[account(mut, has_one = poster)]
+    pub job: Account<'info, Job>,
 }

@@ -84,7 +84,7 @@ const STEP_HELPER: Record<PipelineStep, string> = {
   proving:     'submit SHA-256 proof hash of completed work',
   settling:    'PASS → reward paid. FAIL → stake slashed',
   archiving:   'create settlement archive PDA on L1',
-  compressing: 'compress archive into Merkle leaf — rent-free via Light Protocol',
+  compressing: 'compress archive + job PDA into Merkle leaves — reclaim rent via Light Protocol',
   reputation:  'update agent track record: tasks++, SOL earned',
   complete:    'full lifecycle done — all on-chain',
 }
@@ -711,12 +711,12 @@ function App() {
   // Simulated — real compression requires Light Protocol indexer accounts
   async function stepCompress(): Promise<boolean> {
     setActiveStep('compressing')
-    addEvent('📦 Compressing archive via Light Protocol v2...', 'info')
+    addEvent('📦 Compressing archive + job PDA via Light Protocol v2...', 'info')
     const start = Date.now()
-    // Simulate CPI to Light System Program (would use archive_settlement_compressed on-chain)
+    // Simulate CPI to Light System Program (compress_finished_job + archive_settlement_compressed)
     await new Promise(r => setTimeout(r, 1200))
-    addEvent(`📦 Archive compressed into Merkle leaf — rent-free`, 'success', { ms: Date.now() - start })
-    addEvent(`💰 Saved ~0.003 SOL rent (99.8% reduction)`, 'info')
+    addEvent(`📦 Job data compressed into Merkle leaf — PDA closed, rent reclaimed`, 'success', { ms: Date.now() - start })
+    addEvent(`💰 Reclaimed ~0.004 SOL rent from Job PDA + archive`, 'info')
     setCompletedSteps(prev => new Set([...prev, 'compressing']))
     return true
   }
@@ -943,41 +943,46 @@ function App() {
       {/* Pipeline Visualization */}
       <section className="pipeline-section">
         <div className="pipeline-container">
-          {PIPELINE_STAGES.map((stage) => (
-            <div key={stage.name} className={`pipeline-stage-group pipeline-stage-${stage.color}`}>
-              <div className={`stage-label stage-label-${stage.color}`}>
-                <span className="stage-name">{stage.name}</span>
-                <span className={`stage-badge-sm stage-badge-sm-${stage.color}`}>{stage.badge}</span>
-              </div>
-              <div className="pipeline-stage-track">
-                {stage.steps.map((step, si) => {
-                  const meta = STEP_META[step]
-                  const isActive = activeStep === step
-                  const isCompleted = completedSteps.has(step)
-                  const isPast = PIPELINE_ORDER.indexOf(step) < stepIdx
-                  return (
-                    <div key={step} className="pipeline-node-wrapper">
-                      {si > 0 && (
-                        <div className={`pipeline-connector ${isPast || isCompleted ? 'connector-done' : ''} ${isActive ? 'connector-active' : ''}`}>
-                          <div className="connector-particle" />
-                        </div>
-                      )}
-                      <div className="pipeline-node-col">
-                        <div
-                          className={`pipeline-node ${meta.layer} ${isActive ? 'node-active' : ''} ${isCompleted ? 'node-done' : ''}`}
-                        >
-                          <span className="node-icon">{meta.icon}</span>
-                          <span className="node-label">{meta.label}</span>
-                          {isActive && <div className="node-ring" />}
-                        </div>
-                        <span className={`node-helper ${isActive ? 'node-helper-active' : ''}`}>{STEP_HELPER[step]}</span>
-                      </div>
+          <div className="zone zone-l1">
+            <span className="zone-label">L1 · Solana</span>
+          </div>
+          <div className="zone zone-er">
+            <span className="zone-label">MagicBlock</span>
+          </div>
+          <div className="zone zone-zk">
+            <span className="zone-label">Light Protocol</span>
+          </div>
+
+          <div className="pipeline-track">
+            {PIPELINE_ORDER.filter(s => s !== 'idle').map((step, i) => {
+              const meta = STEP_META[step]
+              const isActive = activeStep === step
+              const isCompleted = completedSteps.has(step)
+              const isPast = PIPELINE_ORDER.indexOf(step) < stepIdx
+              const activeIdx = PIPELINE_ORDER.indexOf(activeStep)
+              const thisIdx = PIPELINE_ORDER.indexOf(step)
+              const isNear = !isActive && Math.abs(thisIdx - activeIdx) === 1 && activeStep !== 'idle' && activeStep !== 'complete'
+              return (
+                <div key={step} className="pipeline-node-wrapper">
+                  {i > 0 && (
+                    <div className={`pipeline-connector ${isPast || isCompleted ? 'connector-done' : ''} ${isActive ? 'connector-active' : ''}`}>
+                      <div className="connector-particle" />
                     </div>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
+                  )}
+                  <div className={`pipeline-node-col ${isActive ? 'col-active' : ''} ${isNear ? 'col-near' : ''}`}>
+                    <div
+                      className={`pipeline-node ${meta.layer} ${isActive ? 'node-active' : ''} ${isCompleted ? 'node-done' : ''} ${isNear ? 'node-near' : ''}`}
+                    >
+                      <span className="node-icon">{meta.icon}</span>
+                      <span className="node-label">{meta.label}</span>
+                      {isActive && <div className="node-ring" />}
+                    </div>
+                    {isActive && <span className="node-helper node-helper-active">{STEP_HELPER[step]}</span>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       </section>
 
