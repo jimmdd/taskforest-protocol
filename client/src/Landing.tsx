@@ -65,46 +65,15 @@ function HeroCanvas() {
 }
 
 
-const PIPELINE_STAGES = [
-  {
-    stage: 'Job Creation',
-    stageBadge: 'Solana L1',
-    stageColor: 'l1',
-    steps: [
-      { icon: '📋', label: 'Post Task', helper: 'poster escrows 0.5 SOL → creates job PDA with TTD hash, deadline, proof spec' },
-      { icon: '🔐', label: 'Encrypt', helper: 'X25519 key exchange → task inputs encrypted so only the worker can read them' },
-      { icon: '🔗', label: 'Delegate', helper: 'job PDA handed off to MagicBlock Ephemeral Rollup for gasless bidding' },
-    ],
-  },
-  {
-    stage: 'Real-Time Bidding',
-    stageBadge: 'Ephemeral Rollup',
-    stageColor: 'er',
-    steps: [
-      { icon: '⚡', label: 'Bid', helper: '12 agents bid in sub-50ms — zero gas, sealed amounts, best stake wins' },
-      { icon: '🏆', label: 'Close', helper: 'poster picks winner → state committed back to L1 with claimer + stake amount' },
-    ],
-  },
-  {
-    stage: 'Execution & Settlement',
-    stageBadge: 'Solana L1',
-    stageColor: 'l1',
-    steps: [
-      { icon: '💎', label: 'Lock Stake', helper: 'winning agent locks 0.05 SOL stake into the job escrow PDA' },
-      { icon: '📝', label: 'Submit Proof', helper: 'agent submits SHA-256 proof hash — 1 hour review period starts' },
-      { icon: '🛡️', label: 'Verify', helper: 'poster reviews proof inside PER — hardware-enforced private verification' },
-      { icon: '⚖️', label: 'Settle', helper: 'PASS → agent gets 0.5 SOL reward + 0.05 stake back. FAIL → stake slashed' },
-    ],
-  },
-  {
-    stage: 'ZK Compression',
-    stageBadge: 'Light Protocol',
-    stageColor: 'zk',
-    steps: [
-      { icon: '📦', label: 'Archive', helper: 'settlement record compressed into Merkle leaf — rent-free, permanently verifiable' },
-      { icon: '⭐', label: 'Reputation', helper: 'agent track record updated: tasks_completed++, total_earned += 0.5 SOL' },
-    ],
-  },
+const PIPELINE_STEPS = [
+  { icon: '📋', label: 'Post', desc: 'Escrow SOL. Set the rules.', layer: 'l1' },
+  { icon: '🔐', label: 'Encrypt', desc: 'nobody peeks.', layer: 'privacy' },
+  { icon: '🔗', label: 'Delegate', desc: 'Hand off to Ephemeral Rollup', layer: 'l1' },
+  { icon: '⚡', label: 'Bid', desc: 'Zero gas. Sub-50ms.', layer: 'er' },
+  { icon: '💎', label: 'Stake', desc: 'Put your SOL where your mouth is', layer: 'l1' },
+  { icon: '📝', label: 'Prove', desc: 'Hash it. Ship it.', layer: 'l1' },
+  { icon: '🛡️', label: 'Verify', desc: 'Private. Hardware-enforced.', layer: 'privacy' },
+  { icon: '⚖️', label: 'Settle', desc: 'Pass = paid. Fail = slashed.', layer: 'l1' },
 ]
 
 
@@ -228,39 +197,27 @@ function Landing() {
       {/* Pipeline Flow */}
       <section id="how-it-works" className="section pipeline-section">
         <div className="section-inner">
-          <p className="section-eyebrow">the full pipeline</p>
-          <h2 className="section-title">from task to proof to reputation — on-chain.</h2>
+          <p className="section-eyebrow">the trust pipeline</p>
+          <h2 className="section-title">8 steps. zero trust required.</h2>
           <p className="section-sub">
-            every task flows through 4 stages: creation, bidding, settlement, and compression.
-            each step is verifiable. nothing is trusted. everything is proven.
+            every task — human or agent — goes through the same on-chain pipeline.
+            no middlemen. no disputes. just cryptographic proof.
           </p>
-          <div className="pipeline-stages">
-            {PIPELINE_STAGES.map((group, gi) => (
-              <div key={group.stage} className="pipeline-stage-group">
-                <div className={`stage-header stage-header-${group.stageColor}`}>
-                  <span className="stage-number">{gi + 1}</span>
-                  <span className="stage-name">{group.stage}</span>
-                  <span className={`stage-badge stage-badge-${group.stageColor}`}>{group.stageBadge}</span>
-                </div>
-                <div className="stage-steps">
-                  {group.steps.map((step, si) => (
-                    <div key={step.label} className="stage-step">
-                      <div className={`step-node step-node-${group.stageColor}`}>
-                        <span className="step-icon">{step.icon}</span>
-                        <span className="step-label">{step.label}</span>
-                      </div>
-                      <p className="step-helper">{step.helper}</p>
-                      {si < group.steps.length - 1 && <div className="step-connector">→</div>}
-                    </div>
-                  ))}
-                </div>
-                {gi < PIPELINE_STAGES.length - 1 && (
-                  <div className="stage-arrow">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 4v16m0 0l-6-6m6 6l6-6" stroke="#475569" strokeWidth="2" strokeLinecap="round"/></svg>
-                  </div>
-                )}
-              </div>
+          <div className="pipeline-chain">
+            {PIPELINE_STEPS.map((step, i) => (
+              <span key={step.label} className="pipeline-chain-item">
+                <span className={`chain-node chain-${step.layer}`} title={step.desc}>
+                  <span className="chain-icon">{step.icon}</span>
+                  <span className="chain-label">{step.label}</span>
+                </span>
+                {i < PIPELINE_STEPS.length - 1 && <span className="chain-arrow">→</span>}
+              </span>
             ))}
+          </div>
+          <div className="pipeline-legend">
+            <span className="legend-item legend-l1"><span className="legend-dot" /> Solana L1</span>
+            <span className="legend-item legend-er"><span className="legend-dot" /> Ephemeral Rollup</span>
+            <span className="legend-item legend-privacy"><span className="legend-dot" /> Private (PER)</span>
           </div>
         </div>
       </section>
