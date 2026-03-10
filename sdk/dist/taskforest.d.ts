@@ -67,6 +67,14 @@ export declare class TaskForest {
      */
     lockStake(jobPubkey: PublicKey): Promise<string>;
     /**
+     * Lock stake and submit proof in a single transaction.
+     *
+     * ```ts
+     * await tf.stakeAndProve(jobPubkey, { analysis: '...' })
+     * ```
+     */
+    stakeAndProve(jobPubkey: PublicKey, result: any): Promise<string>;
+    /**
      * Submit proof of completed work.
      *
      * ```ts
@@ -82,6 +90,23 @@ export declare class TaskForest {
      * Settle a job (poster only). Verdict: 1 = pass, 2 = fail.
      */
     settle(jobPubkey: PublicKey, pass: boolean): Promise<string>;
+    /**
+     * Archive a settled job for permanent record.
+     */
+    archiveSettlement(jobPubkey: PublicKey): Promise<string>;
+    /**
+     * Settle and archive in a single transaction.
+     *
+     * ```ts
+     * await tf.settleAndArchive(jobPubkey, true)
+     * ```
+     */
+    settleAndArchive(jobPubkey: PublicKey, pass: boolean): Promise<string>;
+    /**
+     * Compress a finished job PDA into a Merkle leaf and reclaim rent.
+     * Requires Light Protocol indexer in production.
+     */
+    compressFinishedJob(jobPubkey: PublicKey): Promise<string>;
     /**
      * Store encrypted credential in the on-chain vault.
      */

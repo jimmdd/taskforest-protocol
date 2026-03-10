@@ -1,6 +1,6 @@
 {
   "name": "@taskforest/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "TypeScript SDK for TaskForest — the verifiable task layer for agents and humans on Solana · ZK compressed",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

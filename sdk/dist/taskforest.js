@@ -150,17 +150,17 @@ class TaskForest {
         const encryptionPubkey = privacyLevel > 0
             ? Array.from(this.encryptionKeypair.publicKey)
             : Array.from({ length: 32 }, () => 0);
-        const tx = await this.program.methods
+        // Batch init + delegate into 1 tx (1 signature)
+        const initIx = await this.program.methods
             .initializeJob(new anchor.BN(jobId), new anchor.BN(rewardLamports), new anchor.BN(deadlineSec), proofSpecHash, ttdHash, privacyLevel, encryptionPubkey)
             .accounts({ job: jobPDA, poster: this.wallet.publicKey, systemProgram: web3_js_1.SystemProgram.programId })
-            .transaction();
-        const sig = await this.sendTx(tx);
-        // Auto-delegate to open for bidding
-        const delegateTx = await this.program.methods
+            .instruction();
+        const delegateIx = await this.program.methods
             .delegateJob()
             .accounts({ payer: this.wallet.publicKey, job: jobPDA })
-            .transaction();
-        await this.sendTx(delegateTx);
+            .instruction();
+        const tx = new web3_js_1.Transaction().add(initIx).add(delegateIx);
+        const sig = await this.sendTx(tx);
         return { jobId, pubkey: jobPDA, signature: sig };
     }
     // ─── Search Tasks ───────────────────────────────────────────
@@ -273,6 +273,27 @@ class TaskForest {
             .transaction();
         return this.sendTx(tx);
     }
+    // ─── Batched: Stake + Prove (1 tx, 1 sign) ─────────────────
+    /**
+     * Lock stake and submit proof in a single transaction.
+     *
+     * ```ts
+     * await tf.stakeAndProve(jobPubkey, { analysis: '...' })
+     * ```
+     */
+    async stakeAndProve(jobPubkey, result) {
+        const proofHash = this.hashData(result);
+        const stakeIx = await this.program.methods
+            .lockStake()
+            .accounts({ job: jobPubkey, claimer: this.wallet.publicKey, systemProgram: web3_js_1.SystemProgram.programId })
+            .instruction();
+        const proveIx = await this.program.methods
+            .submitProof(proofHash)
+            .accounts({ job: jobPubkey, submitter: this.wallet.publicKey })
+            .instruction();
+        const tx = new web3_js_1.Transaction().add(stakeIx).add(proveIx);
+        return this.sendTx(tx);
+    }
     // ─── Submit Proof ───────────────────────────────────────────
     /**
      * Submit proof of completed work.
@@ -314,6 +335,65 @@ class TaskForest {
         const tx = await this.program.methods
             .settleJob(verdict)
             .accounts({ poster: this.wallet.publicKey, job: jobPubkey, worker: job.worker })
+            .transaction();
+        return this.sendTx(tx);
+    }
+    // ─── Archive Settlement ─────────────────────────────────────
+    /**
+     * Archive a settled job for permanent record.
+     */
+    async archiveSettlement(jobPubkey) {
+        const [archivePDA] = web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('archive'), jobPubkey.toBuffer()], this.programId);
+        const tx = await this.program.methods
+            .archiveSettlement()
+            .accounts({
+            poster: this.wallet.publicKey,
+            job: jobPubkey,
+            archive: archivePDA,
+            systemProgram: web3_js_1.SystemProgram.programId,
+        })
+            .transaction();
+        return this.sendTx(tx);
+    }
+    // ─── Batched: Settle + Archive (1 tx, 1 sign) ──────────────
+    /**
+     * Settle and archive in a single transaction.
+     *
+     * ```ts
+     * await tf.settleAndArchive(jobPubkey, true)
+     * ```
+     */
+    async settleAndArchive(jobPubkey, pass) {
+        const verdict = pass ? 1 : 2;
+        const job = await this.getTask(jobPubkey);
+        if (!job)
+            throw new Error('Job not found');
+        const [archivePDA] = web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('archive'), jobPubkey.toBuffer()], this.programId);
+        const settleIx = await this.program.methods
+            .settleJob(verdict)
+            .accounts({ poster: this.wallet.publicKey, job: jobPubkey, worker: job.worker })
+            .instruction();
+        const archiveIx = await this.program.methods
+            .archiveSettlement()
+            .accounts({
+            poster: this.wallet.publicKey,
+            job: jobPubkey,
+            archive: archivePDA,
+            systemProgram: web3_js_1.SystemProgram.programId,
+        })
+            .instruction();
+        const tx = new web3_js_1.Transaction().add(settleIx).add(archiveIx);
+        return this.sendTx(tx);
+    }
+    // ─── Compress Finished Job (ZK) ─────────────────────────────
+    /**
+     * Compress a finished job PDA into a Merkle leaf and reclaim rent.
+     * Requires Light Protocol indexer in production.
+     */
+    async compressFinishedJob(jobPubkey) {
+        const tx = await this.program.methods
+            .compressFinishedJob()
+            .accounts({ poster: this.wallet.publicKey, job: jobPubkey })
             .transaction();
         return this.sendTx(tx);
     }
