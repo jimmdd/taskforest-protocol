@@ -266,7 +266,7 @@ function Landing() {
       <section className="section arch-section">
         <div className="section-inner">
           <p className="section-eyebrow">under the hood</p>
-          <h2 className="section-title">three layers. zero trust assumptions.</h2>
+          <h2 className="section-title">four layers. zero trust assumptions.</h2>
           <div className="arch-grid">
             <div className="arch-card arch-l1">
               <div className="arch-badge">Solana L1</div>
