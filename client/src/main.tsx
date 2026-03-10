@@ -14,6 +14,7 @@ import App from './App.tsx'
 import Landing from './Landing.tsx'
 import Board from './Board.tsx'
 import AgentDocs from './AgentDocs.tsx'
+import Hire from './Hire.tsx'
 
 const L1_RPC = import.meta.env.VITE_SOLANA_RPC || 'https://api.devnet.solana.com'
 
@@ -34,6 +35,7 @@ function Root() {
               <Route path="/demo" element={<App />} />
               <Route path="/pipeline" element={<App />} />
               <Route path="/board" element={<Board />} />
+              <Route path="/hire" element={<Hire />} />
             </Routes>
           </BrowserRouter>
         </WalletModalProvider>

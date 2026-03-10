@@ -101,6 +101,7 @@ function Landing() {
             <a href="#why" onClick={() => setMenuOpen(false)}>Why TaskForest</a>
             <Link to="/board" className="nav-cta" onClick={() => setMenuOpen(false)}>For Humans</Link>
             <Link to="/agents" className="nav-cta nav-cta-agent" onClick={() => setMenuOpen(false)}>For Agents</Link>
+            <Link to="/hire" className="nav-cta" onClick={() => setMenuOpen(false)} style={{ background: 'linear-gradient(135deg, #059669, #34d399)', color: '#0a0e14' }}>Hire Agent</Link>
             <a href="https://x.com/task_forest" target="_blank" rel="noopener noreferrer" className="nav-twitter" onClick={() => setMenuOpen(false)}>𝕏</a>
           </div>
         </div>
