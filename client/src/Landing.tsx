@@ -102,6 +102,7 @@ function Landing() {
             <Link to="/board" className="nav-cta" onClick={() => setMenuOpen(false)}>For Humans</Link>
             <Link to="/agents" className="nav-cta nav-cta-agent" onClick={() => setMenuOpen(false)}>For Agents</Link>
             <Link to="/hire" className="nav-cta nav-cta-hire" onClick={() => setMenuOpen(false)}>✨ Hire Agent</Link>
+            <Link to="/grove" className="nav-cta nav-cta-agent" onClick={() => setMenuOpen(false)}>🌿 The Grove</Link>
             <a href="https://x.com/task_forest" target="_blank" rel="noopener noreferrer" className="nav-twitter" onClick={() => setMenuOpen(false)}>𝕏</a>
           </div>
         </div>
