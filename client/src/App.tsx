@@ -37,6 +37,7 @@ type EventEntry = {
   type: 'info' | 'success' | 'error' | 'l1' | 'er' | 'archive'
   txHash?: string
   ms?: number
+  solscanUrl?: string
 }
 
 type PipelineStep =
@@ -80,28 +81,14 @@ const STEP_HELPER: Record<PipelineStep, string> = {
   delegate:    'hand job PDA to MagicBlock Ephemeral Rollup',
   bidding:     'agents bid gaslessly — sub-50ms, zero fees',
   closing:     'select winner → commit state back to L1',
-  staking:     'winner locks SOL stake into escrow PDA',
-  proving:     'submit SHA-256 proof hash of completed work',
-  settling:    'PASS → reward paid. FAIL → stake slashed',
+  staking:     'lock SOL stake + submit proof (batched in 1 tx)',
+  proving:     'SHA-256 proof hash submitted with stake',
+  settling:    'settle + archive in 1 tx — PASS → reward paid',
   archiving:   'create settlement archive PDA on L1',
   compressing: 'compress archive + job PDA into Merkle leaves — reclaim rent via Light Protocol',
   reputation:  'update agent track record: tasks++, SOL earned',
   complete:    'full lifecycle done — all on-chain',
 }
-
-type StageGroup = {
-  name: string
-  badge: string
-  color: string
-  steps: PipelineStep[]
-}
-
-const PIPELINE_STAGES: StageGroup[] = [
-  { name: 'Job Creation', badge: 'Solana L1', color: 'l1', steps: ['init', 'encrypt', 'vault', 'delegate'] },
-  { name: 'Real-Time Bidding', badge: 'MagicBlock ER', color: 'er', steps: ['bidding', 'closing'] },
-  { name: 'Execution & Settlement', badge: 'Solana L1', color: 'l1', steps: ['staking', 'proving', 'settling', 'archiving'] },
-  { name: 'ZK Compression', badge: 'Light Protocol', color: 'zk', steps: ['compressing', 'reputation'] },
-]
 
 const PIPELINE_ORDER: PipelineStep[] = [
   'idle', 'init', 'encrypt', 'vault', 'delegate', 'bidding', 'closing', 'staking', 'proving', 'settling', 'archiving', 'compressing', 'reputation', 'complete'
@@ -400,6 +387,120 @@ function App() {
       return true
     } catch (e) {
       addEvent(`Create failed: ${(e as Error).message.slice(0, 80)}`, 'error')
+      return false
+    }
+  }
+
+  // ── Batched: initialize_job + delegate_job in 1 tx, 1 Phantom sign ──
+  async function stepInitAndDelegate(): Promise<boolean> {
+    if (!program || !publicKey || !jobPDA) return false
+    setActiveStep('init')
+    addEvent('🚀 Batched: Create Job + Delegate to ER (1 tx)...', 'l1')
+    const start = Date.now()
+    try {
+      // Check if job already exists
+      try {
+        const existing = await (program.account as any).job.fetch(jobPDA)
+        if (existing) {
+          const s = existing.status as number
+          addEvent(`Job already exists (status=${s}). Using existing.`, 'info', { ms: Date.now() - start })
+          if (s === 4 || s === 5) {
+            setCompletedSteps(prev => new Set([...prev, 'init', 'encrypt', 'vault', 'delegate', 'bidding', 'closing', 'proving', 'settling']))
+            return true
+          }
+          if (s >= 2) {
+            setCompletedSteps(prev => new Set([...prev, 'init', 'encrypt', 'vault', 'delegate', 'bidding', 'closing']))
+            return true
+          }
+          if (s >= 1) {
+            setCompletedSteps(prev => new Set([...prev, 'init', 'encrypt', 'vault', 'delegate']))
+            return true
+          }
+          setCompletedSteps(prev => new Set([...prev, 'init']))
+          return true
+        }
+      } catch { /* doesn't exist, create it */ }
+
+      const initIx = await program.methods
+        .initializeJob(
+          new anchor.BN(jobId),
+          new anchor.BN(0.1 * LAMPORTS_PER_SOL),
+          new anchor.BN(Math.floor(Date.now() / 1000) + 3600),
+          randomHash(),
+          Array.from({ length: 32 }, () => 0),
+          1,
+          randomHash()
+        )
+        .accounts({ job: jobPDA, poster: publicKey, systemProgram: SystemProgram.programId })
+        .instruction()
+
+      const delegateIx = await program.methods
+        .delegateJob()
+        .accounts({ payer: publicKey, job: jobPDA })
+        .instruction()
+
+      const tx = new Transaction().add(initIx).add(delegateIx)
+      const sig = await sendTx(connection, tx)
+
+      addEvent(`Job #${jobId} created + delegated to ER (1 tx)`, 'success', { txHash: sig, ms: Date.now() - start })
+      await refreshEscrowBalances()
+      setCompletedSteps(prev => new Set([...prev, 'init']))
+      setActiveStep('delegate')
+      setCompletedSteps(prev => new Set([...prev, 'delegate']))
+      return true
+    } catch (e) {
+      addEvent(`Init+Delegate failed: ${(e as Error).message.slice(0, 200)}`, 'error')
+      return false
+    }
+  }
+
+  // ── Batched: fund burner + lock_stake + submit_proof in 1 tx, 1 Phantom sign ──
+  async function stepFundStakeAndProve(stakeAmount: number): Promise<boolean> {
+    if (!program || !publicKey || !jobPDA) return false
+    setActiveStep('staking')
+    addEvent('💎📝 Batched: Fund + Stake + Prove (1 tx)...', 'l1')
+    const start = Date.now()
+    try {
+      const burnerWallet = {
+        publicKey: erBurner.publicKey,
+        signTransaction: async (tx: Transaction) => { tx.partialSign(erBurner); return tx },
+        signAllTransactions: async (txs: Transaction[]) => { txs.forEach(t => t.partialSign(erBurner)); return txs },
+      }
+      const burnerProvider = new anchor.AnchorProvider(connection, burnerWallet as any, { commitment: 'confirmed' })
+      const burnerProgram = new Program(idl as any, burnerProvider)
+
+      const fundAmount = stakeAmount + 5_000_000 // stake + 0.005 SOL for fees
+
+      // Fund burner instruction
+      const fundIx = SystemProgram.transfer({
+        fromPubkey: publicKey,
+        toPubkey: erBurner.publicKey,
+        lamports: fundAmount,
+      })
+
+      // Lock stake instruction
+      const stakeIx = await program.methods
+        .lockStake()
+        .accounts({ job: jobPDA, claimer: erBurner.publicKey, systemProgram: SystemProgram.programId })
+        .instruction()
+
+      // Submit proof instruction
+      const proveIx = await burnerProgram.methods
+        .submitProof(randomHash())
+        .accounts({ job: jobPDA, submitter: erBurner.publicKey })
+        .instruction()
+
+      // All 3 in 1 tx: Phantom pays fee + funds burner, burner co-signs stake+prove
+      const tx = new Transaction().add(fundIx).add(stakeIx).add(proveIx)
+      const sig = await sendL1WithBurner(tx)
+
+      addEvent(`💎 Funded + Staked + Proved (1 tx)`, 'success', { txHash: sig, ms: Date.now() - start })
+      await refreshEscrowBalances()
+      setCompletedSteps(prev => new Set([...prev, 'staking', 'proving']))
+      setActiveStep('proving')
+      return true
+    } catch (e) {
+      addEvent(`Fund+Stake+Prove failed: ${(e as Error).message.slice(0, 200)}`, 'error')
       return false
     }
   }
@@ -708,6 +809,87 @@ function App() {
     }
   }
 
+  // ── Batched: lock_stake + submit_proof in 1 tx, 1 Phantom co-sign ──
+  async function stepStakeAndProve(): Promise<boolean> {
+    if (!program || !jobPDA) return false
+    setActiveStep('staking')
+    addEvent('💎📝 Batched: Stake + Prove in 1 transaction...', 'l1')
+    const start = Date.now()
+    try {
+      const burnerWallet = {
+        publicKey: erBurner.publicKey,
+        signTransaction: async (tx: Transaction) => { tx.partialSign(erBurner); return tx },
+        signAllTransactions: async (txs: Transaction[]) => { txs.forEach(t => t.partialSign(erBurner)); return txs },
+      }
+      const burnerProvider = new anchor.AnchorProvider(connection, burnerWallet as any, { commitment: 'confirmed' })
+      const burnerProgram = new Program(idl as any, burnerProvider)
+
+      // Build both instructions
+      const stakeIx = await program.methods
+        .lockStake()
+        .accounts({ job: jobPDA, claimer: erBurner.publicKey, systemProgram: SystemProgram.programId })
+        .instruction()
+
+      const proveIx = await burnerProgram.methods
+        .submitProof(randomHash())
+        .accounts({ job: jobPDA, submitter: erBurner.publicKey })
+        .instruction()
+
+      // Combine into 1 tx
+      const tx = new Transaction().add(stakeIx).add(proveIx)
+      const sig = await sendL1WithBurner(tx)
+
+      addEvent(`💎 Stake locked + 📝 Proof submitted (1 tx)`, 'success', { txHash: sig, ms: Date.now() - start })
+      await refreshEscrowBalances()
+      setCompletedSteps(prev => new Set([...prev, 'staking', 'proving']))
+      setActiveStep('proving')
+      return true
+    } catch (e) {
+      addEvent(`Stake+Prove failed: ${(e as Error).message.slice(0, 200)}`, 'error')
+      return false
+    }
+  }
+
+  // ── Batched: settle_job + archive_settlement in 1 tx, 1 Phantom sign ──
+  async function stepSettleAndArchive(): Promise<boolean> {
+    if (!program || !publicKey || !jobPDA || !archivePDA) return false
+    setActiveStep('settling')
+    addEvent('⚖️🗄️ Batched: Settle + Archive in 1 transaction...', 'l1')
+    const start = Date.now()
+    try {
+      const jobData = await (program.account as any).job.fetch(jobPDA)
+
+      const settleIx = await program.methods
+        .settleJob(1, randomHash())
+        .accounts({
+          job: jobPDA,
+          settler: publicKey,
+          posterAccount: publicKey,
+          claimerAccount: jobData.claimer,
+        })
+        .instruction()
+
+      const archiveIx = await program.methods
+        .archiveSettlement(randomHash())
+        .accounts({ payer: publicKey, job: jobPDA, archive: archivePDA, systemProgram: SystemProgram.programId })
+        .instruction()
+
+      // Combine into 1 tx
+      const tx = new Transaction().add(settleIx).add(archiveIx)
+      const sig = await sendTx(connection, tx)
+
+      addEvent(`✅ Job settled + 🗄️ Archived (1 tx)`, 'success', { txHash: sig, ms: Date.now() - start })
+      await refreshEscrowBalances()
+      await refreshBalance()
+      setCompletedSteps(prev => new Set([...prev, 'settling', 'archiving']))
+      setActiveStep('archiving')
+      return true
+    } catch (e) {
+      addEvent(`Settle+Archive failed: ${(e as Error).message.slice(0, 200)}`, 'error')
+      return false
+    }
+  }
+
   // Simulated — real compression requires Light Protocol indexer accounts
   async function stepCompress(): Promise<boolean> {
     setActiveStep('compressing')
@@ -744,32 +926,23 @@ function App() {
     addEvent(`Wallet: ${publicKey.toBase58().slice(0, 16)}...`, 'info')
     await refreshBalance()
 
-    if (!await stepInit()) { setRunning(false); return }
-    await new Promise(r => setTimeout(r, 800))
-
-    if (!await stepEncrypt()) { setRunning(false); return }
+    // Sign 1 of 3: Init + Delegate in 1 tx
+    if (!await stepInitAndDelegate()) { setRunning(false); return }
     await new Promise(r => setTimeout(r, 600))
 
+    // Simulated steps (no signing needed)
+    if (!await stepEncrypt()) { setRunning(false); return }
+    await new Promise(r => setTimeout(r, 400))
     if (!await stepVault()) { setRunning(false); return }
-    await new Promise(r => setTimeout(r, 800))
-
-    const delegateResult = await stepDelegate()
-    if (!delegateResult) { setRunning(false); return }
-    await new Promise(r => setTimeout(r, 1000))
+    await new Promise(r => setTimeout(r, 600))
 
     const job = await (program.account as any).job.fetch(jobPDA)
     const status = job.status as number
     let erEndpoint: string | null = null
 
     if (status < 2) {
-      // If stepDelegate returned an ER URL directly (already delegated), use it
-      if (delegateResult.startsWith('http')) {
-        erEndpoint = delegateResult
-        addEvent(`Using existing ER: ${new URL(erEndpoint).hostname}`, 'er')
-      } else {
-        // Fresh delegation — discover ER
-        erEndpoint = await discoverER()
-      }
+      // Delegation happened in Init+Delegate batch — discover ER endpoint
+      erEndpoint = await discoverER()
       if (!erEndpoint) { addEvent('Cannot proceed without ER endpoint', 'error'); setRunning(false); return }
       if (!await stepBid(erEndpoint)) { setRunning(false); return }
       await new Promise(r => setTimeout(r, 800))
@@ -806,60 +979,45 @@ function App() {
     const job2 = await (program.account as any).job.fetch(jobPDA)
     const s2 = job2.status as number
     if (s2 === 2) {
-      // Fund burner with stake amount + fees so it can lock_stake
+      // Sign 2 of 3: Fund burner + Stake + Prove in 1 tx
       const stakeAmount = (job2.claimerStake as any).toNumber?.() ?? Number(job2.claimerStake)
-      const fundAmount = stakeAmount + 5_000_000 // stake + 0.005 SOL for fees
-      addEvent(`Funding burner with ${(fundAmount / LAMPORTS_PER_SOL).toFixed(4)} SOL for stake escrow...`, 'l1')
-      try {
-        const fundTx = new Transaction().add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey!,
-            toPubkey: erBurner.publicKey,
-            lamports: fundAmount,
-          })
-        )
-        await sendTx(connection, fundTx)
-        addEvent('Burner funded ✔', 'success')
-      } catch (e) {
-        addEvent(`Fund burner failed: ${(e as Error).message.slice(0, 200)}`, 'error')
-        setRunning(false); return
-      }
-      await new Promise(r => setTimeout(r, 800))
-      if (!await stepLockStake()) { setRunning(false); return }
+      if (!await stepFundStakeAndProve(stakeAmount)) { setRunning(false); return }
       await new Promise(r => setTimeout(r, 800))
     } else if (s2 >= 6 || s2 >= 3) {
       addEvent('Stake already locked', 'info')
       setCompletedSteps(prev => new Set([...prev, 'staking']))
     }
 
-    // Prove (status 6 = STAKED or 2 = CLAIMED → 3 = SUBMITTED)
+    // If proof was batched with stake, status should now be SUBMITTED (3)
+    // But if we resumed from an existing job, we might need to prove separately
     const job3 = await (program.account as any).job.fetch(jobPDA)
     const s3 = job3.status as number
-    if (s3 === 6 || s3 === 2) {
+    if (s3 === 6) {
+      // Stake was already done but proof wasn't — prove separately
       if (!await stepProve()) { setRunning(false); return }
       await new Promise(r => setTimeout(r, 800))
     } else if (s3 >= 3) {
-      addEvent('Proof already submitted', 'info')
-      setCompletedSteps(prev => new Set([...prev, 'proving']))
+      if (!completedSteps.has('proving')) {
+        addEvent('Proof already submitted', 'info')
+        setCompletedSteps(prev => new Set([...prev, 'proving']))
+      }
     }
 
-    // Settle (status 3 = SUBMITTED → 4 = DONE)
+    // Batched: Settle + Archive (status 3 = SUBMITTED → 4 = DONE + archive created)
     const job4 = await (program.account as any).job.fetch(jobPDA)
     const s4 = job4.status as number
     if (s4 === 3) {
-      if (!await stepSettle()) { setRunning(false); return }
-      await new Promise(r => setTimeout(r, 800))
+      if (!await stepSettleAndArchive()) { setRunning(false); return }
     } else if (s4 >= 4) {
       addEvent('Job already settled', 'info')
       setCompletedSteps(prev => new Set([...prev, 'settling']))
-    }
-
-    try {
-      await (program.account as any).settlementArchive.fetch(archivePDA!)
-      addEvent('Archive already exists', 'info')
-      setCompletedSteps(prev => new Set([...prev, 'archiving']))
-    } catch {
-      if (!await stepArchive()) { setRunning(false); return }
+      try {
+        await (program.account as any).settlementArchive.fetch(archivePDA!)
+        addEvent('Archive already exists', 'info')
+        setCompletedSteps(prev => new Set([...prev, 'archiving']))
+      } catch {
+        if (!await stepArchive()) { setRunning(false); return }
+      }
     }
 
     // ZK Compression steps (simulated — requires Light Protocol indexer in production)
@@ -871,6 +1029,21 @@ function App() {
     setActiveStep('complete')
     setCompletedSteps(prev => new Set([...prev, 'complete']))
     addEvent('🎉 Full lifecycle complete — including ZK compression!', 'success')
+
+    // Collect on-chain txs and show Solscan links
+    const txEvents = events.filter(e => e.txHash)
+    if (txEvents.length > 0) {
+      addEvent('─── On-Chain Transactions (Solscan) ───', 'info')
+      txEvents.forEach((ev, i) => {
+        const shortLabel = ev.label.slice(0, 50).replace(/[^\w\s→+—]/g, '').trim()
+        addEvent(`Tx ${i + 1}: ${shortLabel}`, 'info', {
+          txHash: ev.txHash,
+          solscanUrl: `https://solscan.io/tx/${ev.txHash}?cluster=devnet`
+        })
+      })
+      addEvent(`${txEvents.length} transactions • 3 wallet signatures`, 'success')
+    }
+
     await refreshBalance()
     setRunning(false)
   }
@@ -1100,11 +1273,11 @@ function App() {
                 {ev.txHash && (
                   <a
                     className="stream-link"
-                    href={`https://explorer.solana.com/tx/${ev.txHash}?cluster=devnet`}
+                    href={ev.solscanUrl || `https://solscan.io/tx/${ev.txHash}?cluster=devnet`}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    ↗
+                    ↗ solscan
                   </a>
                 )}
               </div>
