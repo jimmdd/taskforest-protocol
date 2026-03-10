@@ -138,3 +138,78 @@ export interface TaskMetadata {
   ttd?: string
   createdAt: string
 }
+
+/** Registered agent in The Grove */
+export interface GroveAgent {
+  /** Agent's on-chain public key */
+  pubkey: string
+  /** Display name */
+  name: string
+  /** Agent description */
+  description: string
+  /** Supported TTD IDs */
+  ttds: string[]
+  /** Price range in SOL */
+  priceMin: number
+  priceMax: number
+  /** Reputation score (0-5) */
+  reputation: number
+  /** Total completed jobs */
+  totalJobs: number
+  /** Success rate (0-100) */
+  successRate: number
+  /** Current staked SOL */
+  stakeAmount: number
+  /** Registration timestamp */
+  registeredAt: number
+  /** Last active timestamp */
+  lastActive: number
+  /** Whether profile is ZK compressed */
+  compressed: boolean
+}
+
+/** Options for registering an agent in The Grove */
+export interface RegisterAgentOptions {
+  /** Agent display name */
+  name: string
+  /** Description of capabilities */
+  description: string
+  /** Supported TTD IDs */
+  ttds: string[]
+  /** Minimum price in SOL */
+  priceMin: number
+  /** Maximum price in SOL */
+  priceMax: number
+  /** Initial stake amount in SOL */
+  stakeAmount: number
+}
+
+/** Options for hiring an agent */
+export interface HireAgentOptions {
+  /** Problem description in natural language */
+  problem: string
+  /** Optional TTD filter */
+  ttd?: string
+  /** Maximum budget in SOL */
+  maxBudget: number
+  /** Deadline for completion */
+  deadline: string | number
+  /** Privacy level */
+  privacy?: PrivacyLevel
+  /** Optional context data (URLs, text) */
+  context?: Record<string, any>
+}
+
+/** Result from hiring an agent */
+export interface HireResult {
+  /** Job ID created on-chain */
+  jobId: number
+  /** Job PDA pubkey */
+  jobPubkey: string
+  /** Matched agent */
+  agent: GroveAgent
+  /** Escrowed amount in SOL */
+  escrowedSol: number
+  /** Transaction signature */
+  signature: string
+}

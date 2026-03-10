@@ -11,4 +11,8 @@ export type {
   PrivacyLevel,
   TaskMetadata,
   TTDSchema,
+  GroveAgent,
+  RegisterAgentOptions,
+  HireAgentOptions,
+  HireResult,
 } from './types'

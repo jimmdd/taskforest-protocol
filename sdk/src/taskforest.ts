@@ -21,6 +21,10 @@ import {
   AgentCapabilities,
   PrivacyLevel,
   TaskMetadata,
+  GroveAgent,
+  RegisterAgentOptions,
+  HireAgentOptions,
+  HireResult,
 } from './types'
 
 // Load IDL from compiled artifact
@@ -551,5 +555,198 @@ export class TaskForest {
     const sig = await this.connection.requestAirdrop(this.wallet.publicKey, sol * LAMPORTS_PER_SOL)
     await this.connection.confirmTransaction(sig, 'confirmed')
     return sig
+  }
+
+  // ─── The Grove: Agent Registry ──────────────────────────────
+  /**
+   * Register an agent in The Grove (ZK compressed).
+   *
+   * ```ts
+   * const agent = await tf.registerAgent({
+   *   name: 'SentinelBot',
+   *   description: 'Security auditor for Solana programs',
+   *   ttds: ['code-review-v1'],
+   *   priceMin: 0.3,
+   *   priceMax: 0.8,
+   *   stakeAmount: 1.0,
+   * })
+   * ```
+   */
+  async registerAgent(opts: RegisterAgentOptions): Promise<{ pubkey: PublicKey; signature: string }> {
+    const stakeLamports = Math.floor(opts.stakeAmount * LAMPORTS_PER_SOL)
+    const profileHash = this.hashData({
+      name: opts.name,
+      description: opts.description,
+      ttds: opts.ttds,
+      priceMin: opts.priceMin,
+      priceMax: opts.priceMax,
+    })
+
+    const [agentPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('agent'), this.wallet.publicKey.toBuffer()],
+      this.programId
+    )
+
+    const tx = await (this.program.methods as any)
+      .registerAgent(profileHash, new anchor.BN(stakeLamports))
+      .accounts({
+        agent: agentPDA,
+        owner: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .transaction()
+
+    const sig = await this.sendTx(tx)
+    return { pubkey: agentPDA, signature: sig }
+  }
+
+  /**
+   * Get an agent's profile from The Grove.
+   *
+   * ```ts
+   * const agent = await tf.getAgent('7xKX...q9Rf')
+   * ```
+   */
+  async getAgent(walletAddress: string): Promise<GroveAgent | null> {
+    const walletPubkey = new PublicKey(walletAddress)
+    const [agentPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('agent'), walletPubkey.toBuffer()],
+      this.programId
+    )
+
+    try {
+      const account = await this.connection.getAccountInfo(agentPDA)
+      if (!account) return null
+      const decoded = (this.program as any).coder.accounts.decode('agentProfile', account.data)
+      return {
+        pubkey: walletAddress,
+        name: decoded.name || '',
+        description: decoded.description || '',
+        ttds: decoded.ttds || [],
+        priceMin: (decoded.priceMin?.toNumber?.() ?? 0) / LAMPORTS_PER_SOL,
+        priceMax: (decoded.priceMax?.toNumber?.() ?? 0) / LAMPORTS_PER_SOL,
+        reputation: decoded.reputation ?? 0,
+        totalJobs: decoded.totalJobs ?? 0,
+        successRate: decoded.successRate ?? 0,
+        stakeAmount: (decoded.stakeAmount?.toNumber?.() ?? 0) / LAMPORTS_PER_SOL,
+        registeredAt: decoded.registeredAt?.toNumber?.() ?? 0,
+        lastActive: decoded.lastActive?.toNumber?.() ?? 0,
+        compressed: decoded.compressed ?? false,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Search for agents in The Grove.
+   *
+   * ```ts
+   * const agents = await tf.searchAgents({ ttds: ['code-review-v1'], maxPrice: 0.5 })
+   * ```
+   */
+  async searchAgents(filter?: { ttds?: string[]; maxPrice?: number; minReputation?: number }): Promise<GroveAgent[]> {
+    // Fetch all agent profile accounts
+    const accounts = await this.connection.getProgramAccounts(this.programId, {
+      filters: [{ memcmp: { offset: 0, bytes: 'agent' } }],
+    })
+
+    const agents: GroveAgent[] = []
+    for (const { account } of accounts) {
+      try {
+        const decoded = (this.program as any).coder.accounts.decode('agentProfile', account.data)
+        const agent: GroveAgent = {
+          pubkey: decoded.owner?.toBase58?.() ?? '',
+          name: decoded.name || '',
+          description: decoded.description || '',
+          ttds: decoded.ttds || [],
+          priceMin: (decoded.priceMin?.toNumber?.() ?? 0) / LAMPORTS_PER_SOL,
+          priceMax: (decoded.priceMax?.toNumber?.() ?? 0) / LAMPORTS_PER_SOL,
+          reputation: decoded.reputation ?? 0,
+          totalJobs: decoded.totalJobs ?? 0,
+          successRate: decoded.successRate ?? 0,
+          stakeAmount: (decoded.stakeAmount?.toNumber?.() ?? 0) / LAMPORTS_PER_SOL,
+          registeredAt: decoded.registeredAt?.toNumber?.() ?? 0,
+          lastActive: decoded.lastActive?.toNumber?.() ?? 0,
+          compressed: decoded.compressed ?? false,
+        }
+
+        // Apply filters
+        if (filter?.ttds && !agent.ttds.some(t => filter.ttds!.includes(t))) continue
+        if (filter?.maxPrice && agent.priceMin > filter.maxPrice) continue
+        if (filter?.minReputation && agent.reputation < filter.minReputation) continue
+
+        agents.push(agent)
+      } catch { /* skip malformed */ }
+    }
+
+    return agents.sort((a, b) => b.reputation - a.reputation)
+  }
+
+  /**
+   * Update an agent's reputation after job completion (called internally by settle).
+   */
+  async updateAgentReputation(agentWallet: PublicKey, passed: boolean): Promise<string> {
+    const [agentPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('agent'), agentWallet.toBuffer()],
+      this.programId
+    )
+
+    const tx = await (this.program.methods as any)
+      .updateReputation(passed)
+      .accounts({
+        agent: agentPDA,
+        authority: this.wallet.publicKey,
+      })
+      .transaction()
+
+    return this.sendTx(tx)
+  }
+
+  // ─── Hire Agent (end-to-end) ──────────────────────────────────
+  /**
+   * Hire an agent end-to-end: match → post task → escrow → auto-assign.
+   *
+   * ```ts
+   * const result = await tf.hireAgent({
+   *   problem: 'Review my Solana program for security vulnerabilities',
+   *   maxBudget: 0.5,
+   *   deadline: '2h',
+   *   privacy: 'encrypted',
+   * })
+   * console.log(result.agent.name, result.signature)
+   * ```
+   */
+  async hireAgent(opts: HireAgentOptions): Promise<HireResult> {
+    // 1. Search for matching agents
+    const agents = await this.searchAgents({
+      ttds: opts.ttd ? [opts.ttd] : undefined,
+      maxPrice: opts.maxBudget,
+    })
+
+    if (agents.length === 0) {
+      throw new Error('No agents found matching your requirements and budget')
+    }
+
+    // 2. Pick best match (highest reputation within budget)
+    const bestAgent = agents[0] // Already sorted by reputation
+
+    // 3. Post the task with escrow
+    const job = await this.postTask({
+      title: opts.problem,
+      ttd: opts.ttd || bestAgent.ttds[0],
+      input: { problem: opts.problem, context: opts.context || {} },
+      reward: Math.min(opts.maxBudget, bestAgent.priceMax),
+      deadline: opts.deadline,
+      privacy: opts.privacy,
+    })
+
+    return {
+      jobId: job.jobId,
+      jobPubkey: job.pubkey.toBase58(),
+      agent: bestAgent,
+      escrowedSol: Math.min(opts.maxBudget, bestAgent.priceMax),
+      signature: job.signature,
+    }
   }
 }
