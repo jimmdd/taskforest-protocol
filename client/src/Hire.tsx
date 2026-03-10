@@ -216,13 +216,14 @@ export default function Hire() {
     const addEv = (text: string) => setTrackEvents(prev => [...prev, { time: now(), text }])
 
     // Simulate lifecycle
-    setTimeout(() => { setTrackingStatus(1); addEv(`Job created — ${agent.price} SOL escrowed`) }, 600)
+    setTimeout(() => { setTrackingStatus(1); addEv(`Job created — ${agent.price} SOL escrowed in PDA`) }, 600)
+    setTimeout(() => { addEv('🔐 Task data encrypted (NaCl box) — stored in credential vault') }, 1300)
     setTimeout(() => { setTrackingStatus(2); addEv(`${agent.name} matched & accepted`) }, 2000)
-    setTimeout(() => { setTrackingStatus(3); addEv(`${agent.name} staked 0.05 SOL — working...`) }, 3500)
-    setTimeout(() => { addEv('Processing input data...') }, 5000)
+    setTimeout(() => { setTrackingStatus(3); addEv(`${agent.name} staked 0.05 SOL as collateral — working...`) }, 3500)
+    setTimeout(() => { addEv('🔒 Processing encrypted input data...') }, 5000)
     setTimeout(() => { addEv('Generating output...') }, 7000)
-    setTimeout(() => { setTrackingStatus(4); addEv('Proof submitted on-chain') }, 9000)
-    setTimeout(() => { setShowApprove(true); addEv('Ready for review — approve to release payment') }, 10000)
+    setTimeout(() => { setTrackingStatus(4); addEv('🛡️ Proof hash submitted on-chain — verifiable on Solscan') }, 9000)
+    setTimeout(() => { setShowApprove(true); addEv('Ready for review — approve to release escrowed SOL') }, 10000)
   }
 
   function handleApprove() {
@@ -300,6 +301,38 @@ export default function Hire() {
             >
               Find Agents →
             </button>
+
+            {/* Trust & Security Badges */}
+            <div className="hire-trust">
+              <div className="hire-trust-item">
+                <span className="hire-trust-icon">🔐</span>
+                <div>
+                  <strong>End-to-End Encrypted</strong>
+                  <span>Task data encrypted with NaCl box — only you and the agent can read it</span>
+                </div>
+              </div>
+              <div className="hire-trust-item">
+                <span className="hire-trust-icon">🏦</span>
+                <div>
+                  <strong>SOL Escrow Protection</strong>
+                  <span>Funds locked in on-chain PDA — released only after verified completion</span>
+                </div>
+              </div>
+              <div className="hire-trust-item">
+                <span className="hire-trust-icon">⚔️</span>
+                <div>
+                  <strong>Stake Slashing</strong>
+                  <span>Agents stake SOL as collateral — slashed if work is rejected</span>
+                </div>
+              </div>
+              <div className="hire-trust-item">
+                <span className="hire-trust-icon">🛡️</span>
+                <div>
+                  <strong>On-Chain Proof</strong>
+                  <span>Every result is hashed and verified on Solana — no trust required</span>
+                </div>
+              </div>
+            </div>
           </section>
         </>
       )}

@@ -411,10 +411,53 @@
   text-align: center;
 }
 
+/* ── Trust & Security Section ────────── */
+.hire-trust {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+  max-width: 640px;
+  margin: 2.5rem auto 0;
+}
+.hire-trust-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.9rem 1rem;
+  background: rgba(30, 41, 59, 0.35);
+  border: 1px solid rgba(52, 211, 153, 0.08);
+  border-radius: 12px;
+  transition: border-color 0.3s;
+}
+.hire-trust-item:hover {
+  border-color: rgba(52, 211, 153, 0.2);
+}
+.hire-trust-icon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+.hire-trust-item div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.hire-trust-item strong {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+.hire-trust-item span {
+  font-size: 0.68rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+
 /* ── Responsive ──────────────────────── */
 @media (max-width: 640px) {
   .hire-hero h1 { font-size: 1.8rem; }
   .hire-agent-card { grid-template-columns: 1fr; gap: 0.8rem; }
   .hire-agent-cta { flex-direction: row; align-items: center; }
   .hire-status-label { font-size: 0.55rem; }
+  .hire-trust { grid-template-columns: 1fr; }
 }
