@@ -5,6 +5,8 @@ use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
 // ZK Compression (Light Protocol v2)
+use borsh::{BorshDeserialize, BorshSerialize};
+use light_sdk::address::v1::derive_address;
 use light_sdk::{
     account::LightAccount,
     cpi::{
@@ -15,8 +17,6 @@ use light_sdk::{
     instruction::{PackedAddressTreeInfo, ValidityProof},
     LightDiscriminator,
 };
-use light_sdk::address::v1::derive_address;
-use borsh::{BorshDeserialize, BorshSerialize};
 
 declare_id!("Fgiye795epSDkytp6a334Y2AwjqdGDecWV24yc2neZ4s");
 
@@ -29,15 +29,17 @@ pub const BID_SEED: &[u8] = b"bid";
 pub const ARCHIVE_SEED: &[u8] = b"archive";
 pub const TTD_SEED: &[u8] = b"ttd";
 pub const VAULT_SEED: &[u8] = b"vault";
+pub const DISPUTE_SEED: &[u8] = b"dispute";
 
 // --- Status byte constants ---
 pub const STATUS_OPEN: u8 = 0;
 pub const STATUS_BIDDING: u8 = 1;
-pub const STATUS_CLAIMED: u8 = 2;    // winner selected, needs lock_stake
-pub const STATUS_STAKED: u8 = 6;     // stake locked, ready for proof
-pub const STATUS_SUBMITTED: u8 = 3;  // proof submitted, awaiting settlement
-pub const STATUS_DONE: u8 = 4;       // settled PASS
-pub const STATUS_FAILED: u8 = 5;     // settled FAIL or expired
+pub const STATUS_CLAIMED: u8 = 2; // winner selected, needs lock_stake
+pub const STATUS_STAKED: u8 = 6; // stake locked, ready for proof
+pub const STATUS_VERIFIED: u8 = 7;
+pub const STATUS_SUBMITTED: u8 = 3; // proof submitted, awaiting settlement
+pub const STATUS_DONE: u8 = 4; // settled PASS
+pub const STATUS_FAILED: u8 = 5; // settled FAIL or expired
 
 // --- Privacy levels ---
 pub const PRIVACY_PUBLIC: u8 = 0;
@@ -47,6 +49,7 @@ pub const PRIVACY_PER: u8 = 2;
 /// Review period: poster has 1 hour after proof submission to settle.
 /// If they don't, worker can call claim_timeout to auto-win.
 pub const REVIEW_PERIOD_SECS: i64 = 3600;
+pub const DISPUTE_WINDOW_SECS: i64 = 86400;
 
 // --- Error codes ---
 #[error_code]
@@ -79,6 +82,20 @@ pub enum TaskForestError {
     InsufficientEscrow,
     #[msg("TTD URI exceeds maximum length")]
     UriTooLong,
+    #[msg("Job is not in auto-match mode")]
+    NotAutoMatch,
+    #[msg("Insufficient escrow for sub-job")]
+    InsufficientEscrowForSubJob,
+    #[msg("Sub-job reward exceeds remaining escrow")]
+    SubJobExceedsEscrow,
+    #[msg("Dispute window has not ended")]
+    DisputeWindowActive,
+    #[msg("Dispute window has ended")]
+    DisputeWindowExpired,
+    #[msg("Dispute stake too low")]
+    DisputeStakeTooLow,
+    #[msg("Invalid dispute status")]
+    InvalidDisputeStatus,
 }
 
 // --- Account structs ---
@@ -86,40 +103,75 @@ pub enum TaskForestError {
 #[account]
 #[derive(Default)]
 pub struct Job {
-    pub poster: Pubkey,            // 32
-    pub job_id: u64,               // 8
-    pub reward_lamports: u64,      // 8
-    pub deadline: i64,             // 8
-    pub proof_spec_hash: [u8; 32], // 32
-    pub ttd_hash: [u8; 32],        // 32
-    pub privacy_level: u8,         // 1  — 0=public, 1=encrypted, 2=per
-    pub encryption_pubkey: [u8; 32], // 32 — poster's X25519 pubkey for encrypted jobs
+    pub poster: Pubkey,                  // 32
+    pub job_id: u64,                     // 8
+    pub reward_lamports: u64,            // 8
+    pub deadline: i64,                   // 8
+    pub proof_spec_hash: [u8; 32],       // 32
+    pub ttd_hash: [u8; 32],              // 32
+    pub privacy_level: u8,               // 1  — 0=public, 1=encrypted, 2=per
+    pub encryption_pubkey: [u8; 32],     // 32 — poster's X25519 pubkey for encrypted jobs
     pub encrypted_input_hash: [u8; 32],  // 32 — hash of encrypted input (IPFS CID)
     pub encrypted_output_hash: [u8; 32], // 32 — hash of encrypted output
-    pub status: u8,                // 1
-    pub claimer: Pubkey,           // 32
-    pub claimer_stake: u64,        // 8
-    pub best_bid_stake: u64,       // 8
-    pub best_bidder: Pubkey,       // 32
-    pub bid_count: u32,            // 4
-    pub proof_hash: [u8; 32],      // 32
-    pub submitted_at: i64,         // 8
-    pub bump: u8,                  // 1
+    pub status: u8,                      // 1
+    pub claimer: Pubkey,                 // 32
+    pub claimer_stake: u64,              // 8
+    pub best_bid_stake: u64,             // 8
+    pub best_bidder: Pubkey,             // 32
+    pub bid_count: u32,                  // 4
+    pub proof_hash: [u8; 32],            // 32
+    pub submitted_at: i64,               // 8
+    pub assignment_mode: u8,             // 1 — 0=auction, 1=auto-match
+    pub parent_job: Pubkey,              // 32 — Pubkey::default() if root job
+    pub sub_job_count: u16,              // 2
+    pub verification_level: u8,          // 1 — 0-4
+    pub receipt_root: [u8; 32],          // 32 — Merkle root of execution DAG
+    pub receipt_uri: [u8; 32],           // 32 — hash of URI where full DAG stored
+    pub attestation_hash: [u8; 32],      // 32 — TEE attestation hash
+    pub dispute_window_end: i64,         // 8 — when dispute window closes (0 = no window)
+    pub bump: u8,                        // 1
 }
 
 impl Job {
     // Updated size with privacy fields: +1 (privacy_level) +32 (encryption_pubkey) +32 (encrypted_input_hash) +32 (encrypted_output_hash)
-    pub const SIZE: usize = 8 + 32 + 8 + 8 + 8 + 32 + 32 + 1 + 32 + 32 + 32 + 1 + 32 + 8 + 8 + 32 + 4 + 32 + 8 + 1;
+    pub const SIZE: usize = 8
+        + 32
+        + 8
+        + 8
+        + 8
+        + 32
+        + 32
+        + 1
+        + 32
+        + 32
+        + 32
+        + 1
+        + 32
+        + 8
+        + 8
+        + 32
+        + 4
+        + 32
+        + 8
+        + 1
+        + 32
+        + 2
+        + 1
+        + 32
+        + 32
+        + 32
+        + 8
+        + 1;
 }
 
 /// Credential Vault — encrypted credentials accessible only inside PER.
 #[account]
 pub struct CredentialVault {
-    pub poster: Pubkey,              // 32 — who created this vault
-    pub job: Pubkey,                 // 32 — associated job
+    pub poster: Pubkey,                // 32 — who created this vault
+    pub job: Pubkey,                   // 32 — associated job
     pub encrypted_cred_hash: [u8; 32], // 32 — hash of encrypted credential (stored off-chain)
-    pub is_active: bool,             // 1  — cleared after job settles
-    pub bump: u8,                    // 1
+    pub is_active: bool,               // 1  — cleared after job settles
+    pub bump: u8,                      // 1
 }
 
 impl CredentialVault {
@@ -129,12 +181,12 @@ impl CredentialVault {
 /// Task Type Definition — registered on-chain schema for typed agent tasks.
 #[account]
 pub struct TaskTypeDefinition {
-    pub creator: Pubkey,        // 32 — who registered this TTD
-    pub ttd_hash: [u8; 32],     // 32 — SHA-256 of the full TTD JSON
-    pub ttd_uri: String,        // 4 + len — where to fetch it (IPFS/R2/Arweave)
-    pub version: u16,           // 2  — version number
-    pub created_at: i64,        // 8
-    pub bump: u8,               // 1
+    pub creator: Pubkey,    // 32 — who registered this TTD
+    pub ttd_hash: [u8; 32], // 32 — SHA-256 of the full TTD JSON
+    pub ttd_uri: String,    // 4 + len — where to fetch it (IPFS/R2/Arweave)
+    pub version: u16,       // 2  — version number
+    pub created_at: i64,    // 8
+    pub bump: u8,           // 1
 }
 
 impl TaskTypeDefinition {
@@ -147,83 +199,100 @@ impl TaskTypeDefinition {
 #[account]
 #[derive(Default)]
 pub struct SettlementArchive {
-    pub job: Pubkey,              // 32 — the job PDA key
-    pub poster: Pubkey,           // 32
-    pub claimer: Pubkey,          // 32
-    pub reward_lamports: u64,     // 8
-    pub claimer_stake: u64,       // 8
-    pub verdict: u8,              // 1 (0=fail, 1=pass)
-    pub proof_hash: [u8; 32],     // 32
-    pub reason_code: [u8; 32],    // 32
-    pub settled_at: i64,          // 8
-    pub bump: u8,                 // 1
+    pub job: Pubkey,           // 32 — the job PDA key
+    pub poster: Pubkey,        // 32
+    pub claimer: Pubkey,       // 32
+    pub reward_lamports: u64,  // 8
+    pub claimer_stake: u64,    // 8
+    pub verdict: u8,           // 1 (0=fail, 1=pass)
+    pub proof_hash: [u8; 32],  // 32
+    pub reason_code: [u8; 32], // 32
+    pub settled_at: i64,       // 8
+    pub bump: u8,              // 1
 }
 
 impl SettlementArchive {
     pub const SIZE: usize = 8 + 32 + 32 + 32 + 8 + 8 + 1 + 32 + 32 + 8 + 1;
 }
 
+#[account]
+#[derive(Default)]
+pub struct DisputeRecord {
+    pub job: Pubkey,                       // 32
+    pub challenger: Pubkey,                // 32
+    pub challenger_stake: u64,             // 8
+    pub disputed_thread: u32,              // 4
+    pub challenger_receipt_hash: [u8; 32], // 32
+    pub original_receipt_hash: [u8; 32],   // 32
+    pub status: u8,                        // 1 — 0=open, 1=agent_wins, 2=challenger_wins
+    pub evidence_uri: [u8; 32],            // 32
+    pub opened_at: i64,                    // 8
+    pub resolved_at: i64,                  // 8
+    pub bump: u8,                          // 1
+}
+
+impl DisputeRecord {
+    pub const SIZE: usize = 8 + 32 + 32 + 8 + 4 + 32 + 32 + 1 + 32 + 8 + 8 + 1;
+}
+
 // --- Compressed Account Structs (ZK Compression via Light Protocol) ---
 
 /// Compressed Settlement Archive — rent-free, stored as Merkle leaf.
-#[derive(
-    Clone, Debug, Default, BorshSerialize, BorshDeserialize, LightDiscriminator,
-)]
+#[derive(Clone, Debug, Default, BorshSerialize, BorshDeserialize, LightDiscriminator)]
 pub struct CompressedArchive {
-    pub job: Pubkey,              // 32
-    pub poster: Pubkey,           // 32
-    pub claimer: Pubkey,          // 32
-    pub reward_lamports: u64,     // 8
-    pub claimer_stake: u64,       // 8
-    pub verdict: u8,              // 1 (0=fail, 1=pass)
-    pub proof_hash: [u8; 32],     // 32
-    pub reason_code: [u8; 32],    // 32
-    pub settled_at: i64,          // 8
+    pub job: Pubkey,           // 32
+    pub poster: Pubkey,        // 32
+    pub claimer: Pubkey,       // 32
+    pub reward_lamports: u64,  // 8
+    pub claimer_stake: u64,    // 8
+    pub verdict: u8,           // 1 (0=fail, 1=pass)
+    pub proof_hash: [u8; 32],  // 32
+    pub reason_code: [u8; 32], // 32
+    pub settled_at: i64,       // 8
 }
 
 /// Compressed Agent Reputation — rent-free on-chain track record.
-#[derive(
-    Clone, Debug, Default, BorshSerialize, BorshDeserialize, LightDiscriminator,
-)]
+#[derive(Clone, Debug, Default, BorshSerialize, BorshDeserialize, LightDiscriminator)]
 pub struct AgentReputation {
-    pub agent: Pubkey,            // 32
-    pub tasks_completed: u32,     // 4
-    pub tasks_failed: u32,        // 4
-    pub total_earned: u64,        // 8
-    pub total_staked: u64,        // 8
-    pub last_active: i64,         // 8
+    pub agent: Pubkey,        // 32
+    pub tasks_completed: u32, // 4
+    pub tasks_failed: u32,    // 4
+    pub total_earned: u64,    // 8
+    pub total_staked: u64,    // 8
+    pub last_active: i64,     // 8
 }
 
 /// Compressed TTD Registry entry — rent-free schema registration.
-#[derive(
-    Clone, Debug, Default, BorshSerialize, BorshDeserialize, LightDiscriminator,
-)]
+#[derive(Clone, Debug, Default, BorshSerialize, BorshDeserialize, LightDiscriminator)]
 pub struct CompressedTtd {
-    pub creator: Pubkey,          // 32
-    pub ttd_hash: [u8; 32],       // 32
-    pub ttd_uri_hash: [u8; 32],   // 32 — hash of URI (URI stored off-chain)
-    pub version: u16,             // 2
-    pub created_at: i64,          // 8
+    pub creator: Pubkey,        // 32
+    pub ttd_hash: [u8; 32],     // 32
+    pub ttd_uri_hash: [u8; 32], // 32 — hash of URI (URI stored off-chain)
+    pub version: u16,           // 2
+    pub created_at: i64,        // 8
 }
 
 /// Compressed Job — finished job data stored rent-free after settlement.
 /// The original Job PDA is closed and rent reclaimed by the poster.
-#[derive(
-    Clone, Debug, Default, BorshSerialize, BorshDeserialize, LightDiscriminator,
-)]
+#[derive(Clone, Debug, Default, BorshSerialize, BorshDeserialize, LightDiscriminator)]
 pub struct CompressedJob {
-    pub poster: Pubkey,              // 32
-    pub job_id: u64,                 // 8
-    pub reward_lamports: u64,        // 8
-    pub deadline: i64,               // 8
-    pub ttd_hash: [u8; 32],          // 32
-    pub privacy_level: u8,           // 1
-    pub status: u8,                  // 1
-    pub claimer: Pubkey,             // 32
-    pub claimer_stake: u64,          // 8
-    pub proof_hash: [u8; 32],        // 32
-    pub submitted_at: i64,           // 8
-    pub compressed_at: i64,          // 8 — when this was compressed
+    pub poster: Pubkey,             // 32
+    pub job_id: u64,                // 8
+    pub reward_lamports: u64,       // 8
+    pub deadline: i64,              // 8
+    pub ttd_hash: [u8; 32],         // 32
+    pub assignment_mode: u8,        // 1
+    pub parent_job: Pubkey,         // 32
+    pub verification_level: u8,     // 1
+    pub receipt_root: [u8; 32],     // 32
+    pub attestation_hash: [u8; 32], // 32
+    pub privacy_level: u8,          // 1
+    pub status: u8,                 // 1
+    pub claimer: Pubkey,            // 32
+    pub claimer_stake: u64,         // 8
+    pub proof_hash: [u8; 32],       // 32
+    pub submitted_at: i64,          // 8
+    pub compressed_at: i64,         // 8 — when this was compressed
 }
 
 // --- Program instructions ---
@@ -274,11 +343,16 @@ pub mod taskforest {
         ttd_hash: [u8; 32],
         privacy_level: u8,
         encryption_pubkey: [u8; 32],
+        assignment_mode: u8,
+        verification_level: u8,
     ) -> Result<()> {
         require!(reward_lamports > 0, TaskForestError::InvalidReward);
 
         let clock = Clock::get()?;
-        require!(deadline > clock.unix_timestamp, TaskForestError::InvalidDeadline);
+        require!(
+            deadline > clock.unix_timestamp,
+            TaskForestError::InvalidDeadline
+        );
 
         // Transfer reward SOL from poster into job PDA (escrow)
         system_program::transfer(
@@ -311,6 +385,14 @@ pub mod taskforest {
         job.bid_count = 0;
         job.proof_hash = [0u8; 32];
         job.submitted_at = 0;
+        job.assignment_mode = assignment_mode;
+        job.parent_job = Pubkey::default();
+        job.sub_job_count = 0;
+        job.verification_level = verification_level;
+        job.receipt_root = [0u8; 32];
+        job.receipt_uri = [0u8; 32];
+        job.attestation_hash = [0u8; 32];
+        job.dispute_window_end = 0;
         job.bump = ctx.bumps.job;
 
         msg!(
@@ -319,6 +401,190 @@ pub mod taskforest {
             reward_lamports,
             privacy_level,
             &ttd_hash[..4]
+        );
+        Ok(())
+    }
+
+    pub fn auto_assign_job(ctx: Context<AutoAssignJob>, assigned_agent: Pubkey) -> Result<()> {
+        let job = &mut ctx.accounts.job;
+        require!(job.status == STATUS_OPEN, TaskForestError::WrongStatus);
+        require!(job.assignment_mode == 1, TaskForestError::NotAutoMatch);
+        require!(
+            job.poster == ctx.accounts.poster.key(),
+            TaskForestError::Unauthorized
+        );
+
+        job.claimer = assigned_agent;
+        job.status = STATUS_CLAIMED;
+
+        msg!("Auto-assigned: agent={}", assigned_agent);
+        Ok(())
+    }
+
+    pub fn create_sub_job(
+        ctx: Context<CreateSubJob>,
+        sub_job_id: u64,
+        assigned_agent: Pubkey,
+        reward_lamports: u64,
+        deadline: i64,
+        ttd_hash: [u8; 32],
+    ) -> Result<()> {
+        require!(reward_lamports > 0, TaskForestError::InvalidReward);
+
+        let parent_key = ctx.accounts.parent_job.key();
+        let parent_job = &mut ctx.accounts.parent_job;
+        require!(
+            parent_job.status == STATUS_STAKED,
+            TaskForestError::WrongStatus
+        );
+        require!(
+            parent_job.claimer == ctx.accounts.orchestrator.key(),
+            TaskForestError::InvalidClaimer
+        );
+
+        let rent = Rent::get()?.minimum_balance(Job::SIZE);
+        let parent_job_info = parent_job.to_account_info();
+        require!(
+            parent_job_info.lamports() > rent,
+            TaskForestError::InsufficientEscrowForSubJob
+        );
+        let available_escrow = parent_job_info.lamports().saturating_sub(rent);
+        require!(
+            available_escrow >= reward_lamports,
+            TaskForestError::SubJobExceedsEscrow
+        );
+
+        let parent_poster = parent_job.poster;
+        let parent_proof_spec_hash = parent_job.proof_spec_hash;
+        let parent_privacy_level = parent_job.privacy_level;
+        let parent_encryption_pubkey = parent_job.encryption_pubkey;
+        let parent_verification_level = parent_job.verification_level;
+
+        let sub_job_info = ctx.accounts.sub_job.to_account_info();
+        **parent_job_info.try_borrow_mut_lamports()? -= reward_lamports;
+        **sub_job_info.try_borrow_mut_lamports()? += reward_lamports;
+
+        let sub_job = &mut ctx.accounts.sub_job;
+        sub_job.poster = parent_poster;
+        sub_job.job_id = sub_job_id;
+        sub_job.reward_lamports = reward_lamports;
+        sub_job.deadline = deadline;
+        sub_job.proof_spec_hash = parent_proof_spec_hash;
+        sub_job.ttd_hash = ttd_hash;
+        sub_job.privacy_level = parent_privacy_level;
+        sub_job.encryption_pubkey = parent_encryption_pubkey;
+        sub_job.encrypted_input_hash = [0u8; 32];
+        sub_job.encrypted_output_hash = [0u8; 32];
+        sub_job.status = STATUS_OPEN;
+        sub_job.claimer = assigned_agent;
+        sub_job.claimer_stake = 0;
+        sub_job.best_bid_stake = 0;
+        sub_job.best_bidder = Pubkey::default();
+        sub_job.bid_count = 0;
+        sub_job.proof_hash = [0u8; 32];
+        sub_job.submitted_at = 0;
+        sub_job.assignment_mode = 1;
+        sub_job.parent_job = parent_key;
+        sub_job.sub_job_count = 0;
+        sub_job.verification_level = parent_verification_level;
+        sub_job.receipt_root = [0u8; 32];
+        sub_job.receipt_uri = [0u8; 32];
+        sub_job.attestation_hash = [0u8; 32];
+        sub_job.dispute_window_end = 0;
+        sub_job.bump = ctx.bumps.sub_job;
+
+        parent_job.sub_job_count = parent_job
+            .sub_job_count
+            .checked_add(1)
+            .ok_or(TaskForestError::WrongStatus)?;
+
+        msg!(
+            "Sub-job created: parent={} sub_job_id={} agent={} reward={}",
+            parent_key,
+            sub_job_id,
+            assigned_agent,
+            reward_lamports
+        );
+        Ok(())
+    }
+
+    pub fn submit_verified_proof(
+        ctx: Context<SubmitVerifiedProof>,
+        proof_hash: [u8; 32],
+        receipt_root: [u8; 32],
+        receipt_uri: [u8; 32],
+        attestation_hash: [u8; 32],
+    ) -> Result<()> {
+        let job = &mut ctx.accounts.job;
+        require!(
+            job.status == STATUS_STAKED || job.status == STATUS_CLAIMED,
+            TaskForestError::WrongStatus
+        );
+        require!(
+            job.claimer == ctx.accounts.submitter.key(),
+            TaskForestError::InvalidClaimer
+        );
+
+        let clock = Clock::get()?;
+        require!(
+            clock.unix_timestamp <= job.deadline,
+            TaskForestError::DeadlinePassed
+        );
+
+        job.proof_hash = proof_hash;
+        job.receipt_root = receipt_root;
+        job.receipt_uri = receipt_uri;
+        job.attestation_hash = attestation_hash;
+        job.submitted_at = clock.unix_timestamp;
+        job.dispute_window_end = if job.verification_level >= 1 {
+            clock.unix_timestamp + DISPUTE_WINDOW_SECS
+        } else {
+            0
+        };
+        job.status = STATUS_SUBMITTED;
+
+        msg!(
+            "Verified proof submitted for job by {}",
+            ctx.accounts.submitter.key()
+        );
+        Ok(())
+    }
+
+    pub fn auto_settle(ctx: Context<AutoSettle>) -> Result<()> {
+        let job = &mut ctx.accounts.job;
+        require!(job.status == STATUS_SUBMITTED, TaskForestError::WrongStatus);
+        require!(
+            job.dispute_window_end > 0,
+            TaskForestError::DisputeWindowExpired
+        );
+        require!(
+            job.claimer == ctx.accounts.claimer.key(),
+            TaskForestError::InvalidClaimer
+        );
+
+        let now = Clock::get()?.unix_timestamp;
+        require!(
+            now > job.dispute_window_end,
+            TaskForestError::DisputeWindowActive
+        );
+
+        let payout = job.reward_lamports + job.claimer_stake;
+        let job_info = job.to_account_info();
+        let job_lamports = job_info.lamports();
+        let rent = Rent::get()?.minimum_balance(Job::SIZE);
+        let available = job_lamports.saturating_sub(rent);
+        let transfer_amount = payout.min(available);
+
+        if transfer_amount > 0 {
+            **job_info.try_borrow_mut_lamports()? -= transfer_amount;
+            **ctx.accounts.claimer.try_borrow_mut_lamports()? += transfer_amount;
+        }
+
+        job.status = STATUS_DONE;
+        msg!(
+            "Auto-settled: worker={} payout={} after dispute window",
+            job.claimer,
+            transfer_amount
         );
         Ok(())
     }
@@ -362,10 +628,16 @@ pub mod taskforest {
         }
 
         let min_stake = job.reward_lamports / 10;
-        require!(stake_lamports >= min_stake, TaskForestError::InsufficientStake);
+        require!(
+            stake_lamports >= min_stake,
+            TaskForestError::InsufficientStake
+        );
 
         let clock = Clock::get()?;
-        require!(clock.unix_timestamp <= job.deadline, TaskForestError::DeadlinePassed);
+        require!(
+            clock.unix_timestamp <= job.deadline,
+            TaskForestError::DeadlinePassed
+        );
 
         job.bid_count += 1;
         if stake_lamports > job.best_bid_stake {
@@ -442,10 +714,7 @@ pub mod taskforest {
     }
 
     /// Worker submits proof of task completion.
-    pub fn submit_proof(
-        ctx: Context<SubmitProof>,
-        proof_hash: [u8; 32],
-    ) -> Result<()> {
+    pub fn submit_proof(ctx: Context<SubmitProof>, proof_hash: [u8; 32]) -> Result<()> {
         let job = &mut ctx.accounts.job;
         require!(
             job.status == STATUS_STAKED || job.status == STATUS_CLAIMED,
@@ -457,23 +726,25 @@ pub mod taskforest {
         );
 
         let clock = Clock::get()?;
-        require!(clock.unix_timestamp <= job.deadline, TaskForestError::DeadlinePassed);
+        require!(
+            clock.unix_timestamp <= job.deadline,
+            TaskForestError::DeadlinePassed
+        );
 
         job.proof_hash = proof_hash;
         job.submitted_at = clock.unix_timestamp;
         job.status = STATUS_SUBMITTED;
 
-        msg!("Proof submitted for job by {}", ctx.accounts.submitter.key());
+        msg!(
+            "Proof submitted for job by {}",
+            ctx.accounts.submitter.key()
+        );
         Ok(())
     }
 
     /// Settle the job with a pass/fail verdict. Only poster can settle.
     /// Real SOL transfers based on verdict.
-    pub fn settle_job(
-        ctx: Context<SettleJob>,
-        verdict: u8,
-        _reason_code: [u8; 32],
-    ) -> Result<()> {
+    pub fn settle_job(ctx: Context<SettleJob>, verdict: u8, _reason_code: [u8; 32]) -> Result<()> {
         let job = &mut ctx.accounts.job;
         require!(job.status == STATUS_SUBMITTED, TaskForestError::WrongStatus);
         require!(job.proof_hash != [0u8; 32], TaskForestError::MissingProof);
@@ -696,7 +967,10 @@ pub mod taskforest {
         );
 
         let clock = Clock::get()?;
-        require!(new_deadline > clock.unix_timestamp, TaskForestError::InvalidDeadline);
+        require!(
+            new_deadline > clock.unix_timestamp,
+            TaskForestError::InvalidDeadline
+        );
 
         let old = job.deadline;
         job.deadline = new_deadline;
@@ -717,7 +991,10 @@ pub mod taskforest {
         vault.is_active = true;
         vault.bump = ctx.bumps.vault;
 
-        msg!("Credential stored for job: hash={:?}", &encrypted_cred_hash[..4]);
+        msg!(
+            "Credential stored for job: hash={:?}",
+            &encrypted_cred_hash[..4]
+        );
         Ok(())
     }
 
@@ -752,7 +1029,10 @@ pub mod taskforest {
         );
 
         let clock = Clock::get()?;
-        require!(clock.unix_timestamp <= job.deadline, TaskForestError::DeadlineNotPassed);
+        require!(
+            clock.unix_timestamp <= job.deadline,
+            TaskForestError::DeadlineNotPassed
+        );
 
         job.proof_hash = proof_hash;
         job.encrypted_output_hash = encrypted_output_hash;
@@ -819,11 +1099,18 @@ pub mod taskforest {
         LightSystemProgramCpi::new_cpi(LIGHT_CPI_SIGNER, proof)
             .with_light_account(archive)
             .map_err(|_| TaskForestError::WrongStatus)?
-            .with_new_addresses(&[address_tree_info.into_new_address_params_assigned_packed(address_seed, Some(output_state_tree_index))])
+            .with_new_addresses(&[address_tree_info.into_new_address_params_assigned_packed(
+                address_seed,
+                Some(output_state_tree_index),
+            )])
             .invoke(light_cpi_accounts)
             .map_err(|_| TaskForestError::WrongStatus)?;
 
-        msg!("Compressed archive created for job={} verdict={}", job_key, verdict);
+        msg!(
+            "Compressed archive created for job={} verdict={}",
+            job_key,
+            verdict
+        );
         Ok(())
     }
 
@@ -871,7 +1158,10 @@ pub mod taskforest {
         LightSystemProgramCpi::new_cpi(LIGHT_CPI_SIGNER, proof)
             .with_light_account(reputation)
             .map_err(|_| TaskForestError::WrongStatus)?
-            .with_new_addresses(&[address_tree_info.into_new_address_params_assigned_packed(address_seed, Some(output_state_tree_index))])
+            .with_new_addresses(&[address_tree_info.into_new_address_params_assigned_packed(
+                address_seed,
+                Some(output_state_tree_index),
+            )])
             .invoke(light_cpi_accounts)
             .map_err(|_| TaskForestError::WrongStatus)?;
 
@@ -920,11 +1210,18 @@ pub mod taskforest {
         LightSystemProgramCpi::new_cpi(LIGHT_CPI_SIGNER, proof)
             .with_light_account(ttd)
             .map_err(|_| TaskForestError::WrongStatus)?
-            .with_new_addresses(&[address_tree_info.into_new_address_params_assigned_packed(address_seed, Some(output_state_tree_index))])
+            .with_new_addresses(&[address_tree_info.into_new_address_params_assigned_packed(
+                address_seed,
+                Some(output_state_tree_index),
+            )])
             .invoke(light_cpi_accounts)
             .map_err(|_| TaskForestError::WrongStatus)?;
 
-        msg!("Compressed TTD registered: hash={:?} v={}", &ttd_hash[..4], version);
+        msg!(
+            "Compressed TTD registered: hash={:?} v={}",
+            &ttd_hash[..4],
+            version
+        );
         Ok(())
     }
 
@@ -969,6 +1266,11 @@ pub mod taskforest {
         compressed.reward_lamports = job.reward_lamports;
         compressed.deadline = job.deadline;
         compressed.ttd_hash = job.ttd_hash;
+        compressed.assignment_mode = job.assignment_mode;
+        compressed.parent_job = job.parent_job;
+        compressed.verification_level = job.verification_level;
+        compressed.receipt_root = job.receipt_root;
+        compressed.attestation_hash = job.attestation_hash;
         compressed.privacy_level = job.privacy_level;
         compressed.status = job.status;
         compressed.claimer = job.claimer;
@@ -980,7 +1282,10 @@ pub mod taskforest {
         LightSystemProgramCpi::new_cpi(LIGHT_CPI_SIGNER, proof)
             .with_light_account(compressed)
             .map_err(|_| TaskForestError::WrongStatus)?
-            .with_new_addresses(&[address_tree_info.into_new_address_params_assigned_packed(address_seed, Some(output_state_tree_index))])
+            .with_new_addresses(&[address_tree_info.into_new_address_params_assigned_packed(
+                address_seed,
+                Some(output_state_tree_index),
+            )])
             .invoke(light_cpi_accounts)
             .map_err(|_| TaskForestError::WrongStatus)?;
 
@@ -1038,6 +1343,48 @@ pub struct InitializeJob<'info> {
     pub job: Account<'info, Job>,
     #[account(mut)]
     pub poster: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct AutoAssignJob<'info> {
+    #[account(mut)]
+    pub job: Account<'info, Job>,
+    #[account(mut)]
+    pub poster: Signer<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(sub_job_id: u64)]
+pub struct CreateSubJob<'info> {
+    #[account(mut)]
+    pub parent_job: Account<'info, Job>,
+    #[account(
+        init,
+        payer = orchestrator,
+        space = Job::SIZE,
+        seeds = [JOB_SEED, parent_job.poster.as_ref(), &sub_job_id.to_le_bytes()],
+        bump
+    )]
+    pub sub_job: Account<'info, Job>,
+    #[account(mut)]
+    pub orchestrator: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SubmitVerifiedProof<'info> {
+    #[account(mut)]
+    pub job: Account<'info, Job>,
+    pub submitter: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct AutoSettle<'info> {
+    #[account(mut)]
+    pub job: Account<'info, Job>,
+    #[account(mut)]
+    pub claimer: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 

@@ -25,6 +25,9 @@ import {
   RegisterAgentOptions,
   HireAgentOptions,
   HireResult,
+  AutoAssignOptions,
+  CreateSubJobOptions,
+  SubmitVerifiedProofOptions,
 } from './types'
 
 // Load IDL from compiled artifact
@@ -40,6 +43,7 @@ const STATUS_LABELS: Record<number, string> = {
   4: 'settled',
   5: 'failed',
   6: 'wip',
+  7: 'verified',
 }
 
 const PRIVACY_MAP: Record<PrivacyLevel, number> = {
@@ -222,6 +226,14 @@ export class TaskForest {
           claimerStake: decoded.claimerStake?.toNumber?.() ?? 0,
           bestBidStake: decoded.bestBidStake?.toNumber?.() ?? 0,
           bidCount: decoded.bidCount ?? 0,
+          assignmentMode: decoded.assignmentMode ?? 0,
+          parentJob: decoded.parentJob ?? PublicKey.default,
+          subJobCount: decoded.subJobCount ?? 0,
+          verificationLevel: decoded.verificationLevel ?? 0,
+          receiptRoot: decoded.receiptRoot || [],
+          receiptUri: decoded.receiptUri || [],
+          attestationHash: decoded.attestationHash || [],
+          disputeWindowEnd: decoded.disputeWindowEnd?.toNumber?.() ?? 0,
         }
 
         // Apply filters
@@ -263,6 +275,14 @@ export class TaskForest {
         claimerStake: decoded.claimerStake?.toNumber?.() ?? 0,
         bestBidStake: decoded.bestBidStake?.toNumber?.() ?? 0,
         bidCount: decoded.bidCount ?? 0,
+        assignmentMode: decoded.assignmentMode ?? 0,
+        parentJob: decoded.parentJob ?? PublicKey.default,
+        subJobCount: decoded.subJobCount ?? 0,
+        verificationLevel: decoded.verificationLevel ?? 0,
+        receiptRoot: decoded.receiptRoot || [],
+        receiptUri: decoded.receiptUri || [],
+        attestationHash: decoded.attestationHash || [],
+        disputeWindowEnd: decoded.disputeWindowEnd?.toNumber?.() ?? 0,
       }
     } catch {
       return null
@@ -700,6 +720,70 @@ export class TaskForest {
       })
       .transaction()
 
+    return this.sendTx(tx)
+  }
+
+  // ─── Auto-Assign Job (Router) ────────────────────────────────
+  async autoAssignJob(opts: AutoAssignOptions): Promise<string> {
+    const tx = await (this.program.methods as any)
+      .autoAssignJob(opts.assignedAgent)
+      .accounts({ job: opts.jobPubkey, poster: this.wallet.publicKey })
+      .transaction()
+    return this.sendTx(tx)
+  }
+
+  // ─── Create Sub-Job ────────────────────────────────────────
+  async createSubJob(opts: CreateSubJobOptions): Promise<{ subJobPubkey: PublicKey; signature: string }> {
+    const idBuf = Buffer.alloc(8)
+    idBuf.writeBigUInt64LE(BigInt(opts.subJobId))
+    const posterKey = (await this.getTask(opts.parentJobPubkey))?.poster
+    if (!posterKey) throw new Error('Parent job not found')
+
+    const [subJobPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('job'), posterKey.toBuffer(), idBuf],
+      this.programId,
+    )
+
+    const tx = await (this.program.methods as any)
+      .createSubJob(
+        new anchor.BN(opts.subJobId),
+        opts.assignedAgent,
+        new anchor.BN(opts.rewardLamports),
+        new anchor.BN(opts.deadline),
+        opts.ttdHash,
+      )
+      .accounts({
+        parentJob: opts.parentJobPubkey,
+        subJob: subJobPDA,
+        orchestrator: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .transaction()
+
+    const sig = await this.sendTx(tx)
+    return { subJobPubkey: subJobPDA, signature: sig }
+  }
+
+  // ─── Submit Verified Proof ─────────────────────────────────
+  async submitVerifiedProof(opts: SubmitVerifiedProofOptions): Promise<string> {
+    const tx = await (this.program.methods as any)
+      .submitVerifiedProof(
+        opts.proofHash,
+        opts.receiptRoot,
+        opts.receiptUri,
+        opts.attestationHash,
+      )
+      .accounts({ job: opts.jobPubkey, submitter: this.wallet.publicKey })
+      .transaction()
+    return this.sendTx(tx)
+  }
+
+  // ─── Auto-Settle (dispute window expired) ──────────────────
+  async autoSettle(jobPubkey: PublicKey): Promise<string> {
+    const tx = await (this.program.methods as any)
+      .autoSettle()
+      .accounts({ job: jobPubkey, claimer: this.wallet.publicKey })
+      .transaction()
     return this.sendTx(tx)
   }
 

@@ -1,4 +1,13 @@
 export { TaskForest } from './taskforest'
+export {
+  createReceipt,
+  createToolCallReceipt,
+  buildDAG,
+  getMerkleRoot,
+  serializeDAG,
+  deserializeDAG,
+  getReceiptUriHash,
+} from './receipts'
 export type {
   TaskForestConfig,
   PostTaskOptions,
@@ -15,4 +24,12 @@ export type {
   RegisterAgentOptions,
   HireAgentOptions,
   HireResult,
+  AssignmentMode,
+  VerificationLevel,
+  AutoAssignOptions,
+  CreateSubJobOptions,
+  SubmitVerifiedProofOptions,
+  ExecutionReceipt,
+  ToolCallReceipt,
+  ReceiptDAG,
 } from './types'

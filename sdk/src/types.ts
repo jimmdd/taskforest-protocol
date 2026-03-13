@@ -51,38 +51,34 @@ export interface TaskFilter {
   status?: 'open' | 'claimed' | 'staked' | 'submitted'
 }
 
-/** On-chain job data */
+export type AssignmentMode = 'auction' | 'auto-match'
+
+export type VerificationLevel = 0 | 1 | 2 | 3 | 4
+
 export interface Job {
-  /** Job PDA public key */
   pubkey: PublicKey
-  /** Job ID */
   jobId: number
-  /** Poster public key */
   poster: PublicKey
-  /** Worker public key */
   worker: PublicKey
-  /** Reward in lamports */
   rewardLamports: number
-  /** Reward in SOL */
   reward: number
-  /** Deadline (unix timestamp) */
   deadline: number
-  /** Status code (0=open, 1=claimed, 2=staked, 3=submitted, 4=settled, 5=failed, 6=wip) */
   status: number
-  /** Status label */
   statusLabel: string
-  /** Proof hash */
   proofHash: number[]
-  /** Privacy level */
   privacyLevel: number
-  /** TTD hash */
   ttdHash: number[]
-  /** Claimer stake in lamports */
   claimerStake: number
-  /** Best bid stake in lamports */
   bestBidStake: number
-  /** Bid count */
   bidCount: number
+  assignmentMode: number
+  parentJob: PublicKey
+  subJobCount: number
+  verificationLevel: number
+  receiptRoot: number[]
+  receiptUri: number[]
+  attestationHash: number[]
+  disputeWindowEnd: number
 }
 
 /** Task handler for onTask */
@@ -200,16 +196,56 @@ export interface HireAgentOptions {
   context?: Record<string, any>
 }
 
-/** Result from hiring an agent */
 export interface HireResult {
-  /** Job ID created on-chain */
   jobId: number
-  /** Job PDA pubkey */
   jobPubkey: string
-  /** Matched agent */
   agent: GroveAgent
-  /** Escrowed amount in SOL */
   escrowedSol: number
-  /** Transaction signature */
   signature: string
+}
+
+export interface AutoAssignOptions {
+  jobPubkey: PublicKey
+  assignedAgent: PublicKey
+}
+
+export interface CreateSubJobOptions {
+  parentJobPubkey: PublicKey
+  subJobId: number
+  assignedAgent: PublicKey
+  rewardLamports: number
+  deadline: number
+  ttdHash: number[]
+}
+
+export interface SubmitVerifiedProofOptions {
+  jobPubkey: PublicKey
+  proofHash: number[]
+  receiptRoot: number[]
+  receiptUri: number[]
+  attestationHash: number[]
+}
+
+export interface ExecutionReceipt {
+  threadId: number
+  parentThreadId: number | null
+  agentId: string
+  input_hash: number[]
+  output_hash: number[]
+  startedAt: number
+  completedAt: number
+  toolCalls: ToolCallReceipt[]
+}
+
+export interface ToolCallReceipt {
+  tool: string
+  input_hash: number[]
+  output_hash: number[]
+  duration_ms: number
+}
+
+export interface ReceiptDAG {
+  root: ExecutionReceipt
+  children: ReceiptDAG[]
+  merkleRoot: number[]
 }
