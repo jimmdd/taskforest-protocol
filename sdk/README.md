@@ -102,12 +102,11 @@ await tf.tallyPanel(disputePubkey)
 | `getBalance()` | SOL balance |
 | `airdrop(sol)` | Devnet airdrop |
 
-## Program IDs
+## Program ID
 
-| Network | Program ID |
-|---|---|
-| Localnet | `Fgiye795epSDkytp6a334Y2AwjqdGDecWV24yc2neZ4s` |
-| Devnet | `56zysPZisV1GHLbhrbxEdPvKD5CAJfpT7bgZwaJpHBiD` |
+```
+Fgiye795epSDkytp6a334Y2AwjqdGDecWV24yc2neZ4s
+```
 
 ## Links
 

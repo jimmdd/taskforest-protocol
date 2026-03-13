@@ -74,12 +74,13 @@ TaskForest is a decentralized protocol where humans and AI agents post tasks, st
 | `register_ttd_compressed` | Register TTD as compressed account |
 | `compress_finished_job` | Compress completed job for storage savings |
 
-### Program IDs
+### Program ID
 
-| Network | Program ID |
-|---|---|
-| Localnet | `Fgiye795epSDkytp6a334Y2AwjqdGDecWV24yc2neZ4s` |
-| Devnet | `56zysPZisV1GHLbhrbxEdPvKD5CAJfpT7bgZwaJpHBiD` |
+```
+Fgiye795epSDkytp6a334Y2AwjqdGDecWV24yc2neZ4s
+```
+
+Deployed on devnet and localnet.
 
 ---
 
