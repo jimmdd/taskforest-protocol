@@ -589,6 +589,132 @@ pub mod taskforest {
         Ok(())
     }
 
+    pub fn open_dispute(
+        ctx: Context<OpenDispute>,
+        disputed_thread: u32,
+        challenger_receipt_hash: [u8; 32],
+        evidence_uri: [u8; 32],
+    ) -> Result<()> {
+        let job = &mut ctx.accounts.job;
+        require!(job.status == STATUS_SUBMITTED, TaskForestError::WrongStatus);
+        require!(
+            job.dispute_window_end > 0,
+            TaskForestError::DisputeWindowExpired
+        );
+
+        let clock = Clock::get()?;
+        require!(
+            clock.unix_timestamp < job.dispute_window_end,
+            TaskForestError::DisputeWindowExpired
+        );
+        require!(
+            ctx.accounts.challenger.key() != job.claimer,
+            TaskForestError::InvalidClaimer
+        );
+
+        let stake_lamports = job.reward_lamports / 10;
+        require!(
+            stake_lamports >= job.reward_lamports / 10,
+            TaskForestError::DisputeStakeTooLow
+        );
+
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.challenger.to_account_info(),
+                    to: ctx.accounts.dispute.to_account_info(),
+                },
+            ),
+            stake_lamports,
+        )?;
+
+        let dispute = &mut ctx.accounts.dispute;
+        dispute.job = job.key();
+        dispute.challenger = ctx.accounts.challenger.key();
+        dispute.challenger_stake = stake_lamports;
+        dispute.disputed_thread = disputed_thread;
+        dispute.challenger_receipt_hash = challenger_receipt_hash;
+        dispute.original_receipt_hash = job.receipt_root;
+        dispute.status = 0;
+        dispute.evidence_uri = evidence_uri;
+        dispute.opened_at = clock.unix_timestamp;
+        dispute.resolved_at = 0;
+        dispute.bump = ctx.bumps.dispute;
+
+        msg!(
+            "Dispute opened: job={} thread={} challenger={}",
+            job.key(),
+            disputed_thread,
+            ctx.accounts.challenger.key()
+        );
+        Ok(())
+    }
+
+    pub fn resolve_dispute(ctx: Context<ResolveDispute>, verdict: u8) -> Result<()> {
+        let job = &mut ctx.accounts.job;
+        let dispute = &mut ctx.accounts.dispute;
+
+        require!(dispute.status == 0, TaskForestError::InvalidDisputeStatus);
+        require!(
+            verdict == 1 || verdict == 2,
+            TaskForestError::InvalidVerdict
+        );
+        require!(
+            job.poster == ctx.accounts.resolver.key(),
+            TaskForestError::Unauthorized
+        );
+        require!(dispute.job == job.key(), TaskForestError::Unauthorized);
+        require!(
+            dispute.challenger == ctx.accounts.challenger_account.key(),
+            TaskForestError::Unauthorized
+        );
+
+        let dispute_info = dispute.to_account_info();
+        let job_info = job.to_account_info();
+
+        if verdict == 1 {
+            let dispute_lamports = dispute_info.lamports();
+            let dispute_rent = Rent::get()?.minimum_balance(DisputeRecord::SIZE);
+            let dispute_available = dispute_lamports.saturating_sub(dispute_rent);
+            let transfer_amount = dispute.challenger_stake.min(dispute_available);
+
+            if transfer_amount > 0 {
+                **dispute_info.try_borrow_mut_lamports()? -= transfer_amount;
+                **job_info.try_borrow_mut_lamports()? += transfer_amount;
+            }
+
+            dispute.status = 1;
+        } else {
+            let dispute_lamports = dispute_info.lamports();
+            let dispute_rent = Rent::get()?.minimum_balance(DisputeRecord::SIZE);
+            let dispute_available = dispute_lamports.saturating_sub(dispute_rent);
+            let refund_amount = dispute.challenger_stake.min(dispute_available);
+
+            if refund_amount > 0 {
+                **dispute_info.try_borrow_mut_lamports()? -= refund_amount;
+                **ctx.accounts.challenger_account.try_borrow_mut_lamports()? += refund_amount;
+            }
+
+            let job_lamports = job_info.lamports();
+            let job_rent = Rent::get()?.minimum_balance(Job::SIZE);
+            let job_available = job_lamports.saturating_sub(job_rent);
+            let penalty_amount = job.claimer_stake.min(job_available);
+
+            if penalty_amount > 0 {
+                **job_info.try_borrow_mut_lamports()? -= penalty_amount;
+                **ctx.accounts.challenger_account.try_borrow_mut_lamports()? += penalty_amount;
+            }
+
+            job.status = STATUS_FAILED;
+            dispute.status = 2;
+        }
+
+        dispute.resolved_at = Clock::get()?.unix_timestamp;
+        msg!("Dispute resolved: verdict={} job={}", verdict, job.key());
+        Ok(())
+    }
+
     /// Delegate job PDA to an Ephemeral Rollup for real-time bidding.
     pub fn delegate_job(ctx: Context<DelegateJob>) -> Result<()> {
         let poster = ctx.accounts.job.poster;
@@ -1386,6 +1512,36 @@ pub struct AutoSettle<'info> {
     #[account(mut)]
     pub claimer: Signer<'info>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(disputed_thread: u32)]
+pub struct OpenDispute<'info> {
+    #[account(mut)]
+    pub job: Account<'info, Job>,
+    #[account(
+        init,
+        payer = challenger,
+        space = DisputeRecord::SIZE,
+        seeds = [DISPUTE_SEED, job.key().as_ref(), &disputed_thread.to_le_bytes()],
+        bump
+    )]
+    pub dispute: Account<'info, DisputeRecord>,
+    #[account(mut)]
+    pub challenger: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ResolveDispute<'info> {
+    #[account(mut)]
+    pub job: Account<'info, Job>,
+    #[account(mut)]
+    pub dispute: Account<'info, DisputeRecord>,
+    pub resolver: Signer<'info>,
+    /// CHECK: Receives stake refund on challenger_wins. Validated via dispute.challenger.
+    #[account(mut)]
+    pub challenger_account: UncheckedAccount<'info>,
 }
 
 #[delegate]

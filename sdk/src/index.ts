@@ -32,4 +32,7 @@ export type {
   ExecutionReceipt,
   ToolCallReceipt,
   ReceiptDAG,
+  DisputeRecord,
+  OpenDisputeOptions,
+  ResolveDisputeOptions,
 } from './types'

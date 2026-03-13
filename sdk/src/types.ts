@@ -249,3 +249,32 @@ export interface ReceiptDAG {
   children: ReceiptDAG[]
   merkleRoot: number[]
 }
+
+export interface DisputeRecord {
+  pubkey: PublicKey
+  job: PublicKey
+  challenger: PublicKey
+  challengerStake: number
+  disputedThread: number
+  challengerReceiptHash: number[]
+  originalReceiptHash: number[]
+  status: number
+  evidenceUri: number[]
+  openedAt: number
+  resolvedAt: number
+}
+
+export interface OpenDisputeOptions {
+  jobPubkey: PublicKey
+  disputedThread: number
+  challengerReceiptHash: number[]
+  evidenceUri: number[]
+  stakeLamports: number
+}
+
+export interface ResolveDisputeOptions {
+  jobPubkey: PublicKey
+  disputePubkey: PublicKey
+  challengerPubkey: PublicKey
+  verdict: 1 | 2
+}

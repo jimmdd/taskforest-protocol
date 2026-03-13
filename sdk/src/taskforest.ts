@@ -28,6 +28,9 @@ import {
   AutoAssignOptions,
   CreateSubJobOptions,
   SubmitVerifiedProofOptions,
+  DisputeRecord,
+  OpenDisputeOptions,
+  ResolveDisputeOptions,
 } from './types'
 
 // Load IDL from compiled artifact
@@ -785,6 +788,80 @@ export class TaskForest {
       .accounts({ job: jobPubkey, claimer: this.wallet.publicKey })
       .transaction()
     return this.sendTx(tx)
+  }
+
+  // ─── Open Dispute ───────────────────────────────────────────
+  async openDispute(opts: OpenDisputeOptions): Promise<{ disputePubkey: PublicKey; signature: string }> {
+    const threadBuf = Buffer.alloc(4)
+    threadBuf.writeUInt32LE(opts.disputedThread)
+
+    const [disputePDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('dispute'), opts.jobPubkey.toBuffer(), threadBuf],
+      this.programId,
+    )
+
+    const tx = await (this.program.methods as any)
+      .openDispute(
+        opts.disputedThread,
+        opts.challengerReceiptHash,
+        opts.evidenceUri,
+      )
+      .accounts({
+        job: opts.jobPubkey,
+        dispute: disputePDA,
+        challenger: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .transaction()
+
+    const sig = await this.sendTx(tx)
+    return { disputePubkey: disputePDA, signature: sig }
+  }
+
+  // ─── Resolve Dispute ──────────────────────────────────────
+  async resolveDispute(opts: ResolveDisputeOptions): Promise<string> {
+    const tx = await (this.program.methods as any)
+      .resolveDispute(opts.verdict)
+      .accounts({
+        job: opts.jobPubkey,
+        dispute: opts.disputePubkey,
+        resolver: this.wallet.publicKey,
+        challengerAccount: opts.challengerPubkey,
+      })
+      .transaction()
+    return this.sendTx(tx)
+  }
+
+  // ─── Get Dispute ──────────────────────────────────────────
+  async getDispute(jobPubkey: PublicKey, threadId: number): Promise<DisputeRecord | null> {
+    const threadBuf = Buffer.alloc(4)
+    threadBuf.writeUInt32LE(threadId)
+
+    const [disputePDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('dispute'), jobPubkey.toBuffer(), threadBuf],
+      this.programId,
+    )
+
+    try {
+      const account = await this.connection.getAccountInfo(disputePDA)
+      if (!account) return null
+      const decoded = (this.program as any).coder.accounts.decode('disputeRecord', account.data)
+      return {
+        pubkey: disputePDA,
+        job: decoded.job,
+        challenger: decoded.challenger,
+        challengerStake: decoded.challengerStake?.toNumber?.() ?? 0,
+        disputedThread: decoded.disputedThread ?? 0,
+        challengerReceiptHash: decoded.challengerReceiptHash || [],
+        originalReceiptHash: decoded.originalReceiptHash || [],
+        status: decoded.status ?? 0,
+        evidenceUri: decoded.evidenceUri || [],
+        openedAt: decoded.openedAt?.toNumber?.() ?? 0,
+        resolvedAt: decoded.resolvedAt?.toNumber?.() ?? 0,
+      }
+    } catch {
+      return null
+    }
   }
 
   // ─── Hire Agent (end-to-end) ──────────────────────────────────
