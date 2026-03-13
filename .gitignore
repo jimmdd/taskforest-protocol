@@ -12,6 +12,9 @@ keys/
 # Build artifacts
 sdk/dist/
 
+# Cloudflare Workers (moved to taskforest-app)
+.wrangler/
+
 # OS
 .DS_Store
 *.swp
@@ -21,6 +24,3 @@ sdk/dist/
 .idea/
 .vscode/
 *.iml
-
-# Docs (generated)
-docs/
