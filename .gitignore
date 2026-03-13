@@ -10,7 +10,7 @@ node_modules/
 keys/
 
 # Build artifacts
-client/dist/
+sdk/dist/
 
 # OS
 .DS_Store
@@ -21,5 +21,6 @@ client/dist/
 .idea/
 .vscode/
 *.iml
-worker/node_modules
+
+# Docs (generated)
 docs/

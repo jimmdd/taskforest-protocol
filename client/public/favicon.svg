@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" fill="#0a0e14"/>
-  <!-- Tree: three stacked triangles + trunk -->
-  <polygon points="16,4 10,12 22,12" fill="#34d399"/>
-  <polygon points="16,8 8,18 24,18" fill="#34d399"/>
-  <polygon points="16,13 6,24 26,24" fill="#34d399"/>
-  <rect x="14" y="24" width="4" height="4" fill="#34d399"/>
-</svg>
