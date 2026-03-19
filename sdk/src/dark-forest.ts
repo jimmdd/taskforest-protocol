@@ -2,310 +2,246 @@ import { PublicKey, Connection, SystemProgram, LAMPORTS_PER_SOL } from '@solana/
 import { Program, AnchorProvider, BN, Wallet, Idl } from '@coral-xyz/anchor'
 
 const PROGRAM_ID = new PublicKey('DFpay111111111111111111111111111111111111111')
-const CHANNEL_SEED = Buffer.from('channel')
-const VOUCHER_SEED = Buffer.from('voucher')
+const ESCROW_SEED = Buffer.from('escrow')
 const SETTLEMENT_SEED = Buffer.from('settlement')
-const PERMISSION_PROGRAM_ID = new PublicKey('ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1')
-const DELEGATION_PROGRAM_ID = new PublicKey('DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh')
 
 export const TEE_VALIDATORS = {
   mainnet: new PublicKey('MTEWGuqxUpYZGFJQcp8tLN7x5v9BSeoFHYWQQ3n3xzo'),
   devnet: new PublicKey('FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA'),
 } as const
 
-export const ER_ENDPOINTS = {
+export const PER_ENDPOINTS = {
   mainnet: 'https://mainnet-tee.magicblock.app',
   devnet: 'https://tee.magicblock.app',
   devnetRouter: 'https://devnet-router.magicblock.app',
 } as const
 
-export interface ChannelState {
-  channelId: number
+export type MppSessionConfig = {
+  agentEndpoint: string
+  token: 'SOL' | 'USDC' | 'PYUSD'
+  budgetLamports: number
+  perEndpoint: string
+}
+
+export type MppSessionState = {
+  sessionId: string
+  escrowId: number
+  totalPaid: number
+  requestCount: number
+  isActive: boolean
+}
+
+export interface EscrowState {
+  escrowId: number
+  jobPubkey: PublicKey
   poster: PublicKey
   agent: PublicKey
   deposited: number
-  claimed: number
-  voucherCount: number
-  lastVoucherAmount: number
-  status: 'Open' | 'Settling' | 'Closed'
+  status: 'Active' | 'Delegated' | 'Settled'
+  teePubkey: number[]
+  teeVerified: boolean
+  mppSessionId: number[]
   createdAt: number
-  expiresAt: number
 }
 
 export interface SettlementState {
-  channelId: number
+  escrowId: number
+  jobPubkey: PublicKey
   poster: PublicKey
   agent: PublicKey
   totalDeposited: number
-  totalClaimed: number
-  voucherCount: number
+  totalPaid: number
   settledAt: number
   settlementHash: number[]
 }
 
-function deriveChannelPda(channelId: number): [PublicKey, number] {
+function deriveEscrowPda(escrowId: number): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [CHANNEL_SEED, new BN(channelId).toArrayLike(Buffer, 'le', 8)],
+    [ESCROW_SEED, new BN(escrowId).toArrayLike(Buffer, 'le', 8)],
     PROGRAM_ID,
   )
 }
 
-function deriveVoucherPda(channelId: number): [PublicKey, number] {
+function deriveSettlementPda(escrowId: number): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [VOUCHER_SEED, new BN(channelId).toArrayLike(Buffer, 'le', 8)],
+    [SETTLEMENT_SEED, new BN(escrowId).toArrayLike(Buffer, 'le', 8)],
     PROGRAM_ID,
   )
 }
 
-function deriveSettlementPda(channelId: number): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [SETTLEMENT_SEED, new BN(channelId).toArrayLike(Buffer, 'le', 8)],
-    PROGRAM_ID,
-  )
-}
-
-export class DarkForest {
+export class DarkForestPayments {
   private program: Program<Idl>
   private provider: AnchorProvider
   private perConnection: Connection | null = null
+  private activeSessions: Map<number, MppSessionState> = new Map()
 
-  constructor(
-    provider: AnchorProvider,
-    idl: Idl,
-  ) {
+  constructor(provider: AnchorProvider, idl: Idl) {
     this.provider = provider
     this.program = new Program(idl, provider)
   }
 
-  static fromIdl(
-    provider: AnchorProvider,
-    idl: Idl,
-  ): DarkForest {
-    return new DarkForest(provider, idl)
-  }
-
-  connectToPer(endpoint: string): void {
+  connectToPer(endpoint: string = PER_ENDPOINTS.devnet): void {
     this.perConnection = new Connection(endpoint, 'confirmed')
   }
 
-  getPerConnection(): Connection {
-    if (!this.perConnection) throw new Error('PER connection not established. Call connectToPer() first.')
-    return this.perConnection
-  }
+  // ── On-chain: Escrow Wrapper ──────────────────────────────────
 
-  // ── Channel Lifecycle ─────────────────────────────────────────
-
-  async createChannel(
-    channelId: number,
-    agent: PublicKey,
+  async createEscrowWrapper(
+    escrowId: number,
+    jobPubkey: PublicKey,
     depositSol: number,
-    expiresInSeconds: number,
+    mppSessionId: number[] = Array(32).fill(0),
   ): Promise<string> {
-    const [channelPda] = deriveChannelPda(channelId)
-    const depositLamports = new BN(Math.floor(depositSol * LAMPORTS_PER_SOL))
-
-    const tx = await this.program.methods
-      .createChannel(
-        new BN(channelId),
-        agent,
-        depositLamports,
-        new BN(expiresInSeconds),
+    const [escrowPda] = deriveEscrowPda(escrowId)
+    return this.program.methods
+      .createEscrowWrapper(
+        new BN(escrowId),
+        new BN(Math.floor(depositSol * LAMPORTS_PER_SOL)),
+        mppSessionId,
       )
       .accounts({
-        channel: channelPda,
-        poster: this.provider.wallet.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc()
-
-    return tx
-  }
-
-  async fundChannel(channelId: number, amountSol: number): Promise<string> {
-    const [channelPda] = deriveChannelPda(channelId)
-    const amountLamports = new BN(Math.floor(amountSol * LAMPORTS_PER_SOL))
-
-    return this.program.methods
-      .fundChannel(amountLamports)
-      .accounts({
-        channel: channelPda,
+        job: jobPubkey,
+        escrow: escrowPda,
         poster: this.provider.wallet.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .rpc()
   }
 
-  async delegateToTee(
-    channelId: number,
+  async delegateToPer(
+    escrowId: number,
     validator: PublicKey = TEE_VALIDATORS.devnet,
   ): Promise<string> {
-    const [channelPda] = deriveChannelPda(channelId)
-
+    const [escrowPda] = deriveEscrowPda(escrowId)
     return this.program.methods
-      .delegateChannel({ channel: { channelId: new BN(channelId) } })
+      .delegateToPer()
       .accounts({
-        pda: channelPda,
+        pda: escrowPda,
         payer: this.provider.wallet.publicKey,
         validator,
       })
       .rpc()
   }
 
-  async sendVoucher(channelId: number, cumulativeAmountSol: number): Promise<string> {
-    if (!this.perConnection) throw new Error('Must connect to PER first')
-
-    const [channelPda] = deriveChannelPda(channelId)
-    const [voucherPda] = deriveVoucherPda(channelId)
-    const cumulativeLamports = new BN(Math.floor(cumulativeAmountSol * LAMPORTS_PER_SOL))
-
-    const perProvider = new AnchorProvider(
-      this.perConnection,
-      this.provider.wallet as Wallet,
-      { commitment: 'confirmed', skipPreflight: true },
-    )
-    const perProgram = new Program(this.program.idl, perProvider)
-
-    return perProgram.methods
-      .sendVoucher(new BN(channelId), cumulativeLamports)
-      .accounts({
-        channel: channelPda,
-        voucher: voucherPda,
-        poster: this.provider.wallet.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc()
-  }
-
-  async claim(channelId: number, agentWallet: Wallet): Promise<string> {
-    const [channelPda] = deriveChannelPda(channelId)
-
+  async verifyTeeAttestation(
+    escrowId: number,
+    attestationReport: Buffer,
+    teePubkey: number[],
+  ): Promise<string> {
+    const [escrowPda] = deriveEscrowPda(escrowId)
     return this.program.methods
-      .claim(new BN(channelId))
+      .verifyTeeAttestation(new BN(escrowId), attestationReport, teePubkey)
       .accounts({
-        channel: channelPda,
-        agent: agentWallet.publicKey,
-      })
-      .signers([])
-      .rpc()
-  }
-
-  async closeChannel(channelId: number, agentPubkey: PublicKey): Promise<string> {
-    const [channelPda] = deriveChannelPda(channelId)
-
-    return this.program.methods
-      .closeChannel(new BN(channelId))
-      .accounts({
-        channel: channelPda,
-        poster: this.provider.wallet.publicKey,
-        agent: agentPubkey,
-      })
-      .rpc()
-  }
-
-  // ── PER Settlement ────────────────────────────────────────────
-
-  async settleAndUndelegate(channelId: number): Promise<string> {
-    if (!this.perConnection) throw new Error('Must connect to PER first')
-
-    const [channelPda] = deriveChannelPda(channelId)
-
-    const perProvider = new AnchorProvider(
-      this.perConnection,
-      this.provider.wallet as Wallet,
-      { commitment: 'confirmed', skipPreflight: true },
-    )
-    const perProgram = new Program(this.program.idl, perProvider)
-
-    return perProgram.methods
-      .settleAndUndelegate()
-      .accounts({
-        channel: channelPda,
+        escrow: escrowPda,
         payer: this.provider.wallet.publicKey,
       })
       .rpc()
   }
 
-  async recordSettlement(channelId: number): Promise<string> {
-    const [channelPda] = deriveChannelPda(channelId)
-    const [settlementPda] = deriveSettlementPda(channelId)
-
+  async recordSettlement(escrowId: number, totalPaidSol: number): Promise<string> {
+    const [escrowPda] = deriveEscrowPda(escrowId)
+    const [settlementPda] = deriveSettlementPda(escrowId)
     return this.program.methods
-      .recordSettlement(new BN(channelId))
+      .recordSettlement(new BN(escrowId), new BN(Math.floor(totalPaidSol * LAMPORTS_PER_SOL)))
       .accounts({
-        channel: channelPda,
+        escrow: escrowPda,
         settlementRecord: settlementPda,
+        poster: this.provider.wallet.publicKey,
         payer: this.provider.wallet.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .rpc()
   }
 
-  // ── Permission Management ─────────────────────────────────────
+  // ── MPP Session (private via PER) ─────────────────────────────
 
-  async createPermission(channelId: number, permissionPda: PublicKey): Promise<string> {
-    const [channelPda] = deriveChannelPda(channelId)
+  async startPrivateSession(
+    escrowId: number,
+    jobPubkey: PublicKey,
+    config: MppSessionConfig,
+  ): Promise<MppSessionState> {
+    const depositSol = config.budgetLamports / LAMPORTS_PER_SOL
+    const sessionId = `dark-${escrowId}-${Date.now()}`
+    const sessionIdBytes = Array.from(Buffer.from(sessionId.padEnd(32, '\0').slice(0, 32)))
 
-    return this.program.methods
-      .createChannelPermission(new BN(channelId))
-      .accounts({
-        channel: channelPda,
-        permission: permissionPda,
-        payer: this.provider.wallet.publicKey,
-        permissionProgram: PERMISSION_PROGRAM_ID,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc()
+    await this.createEscrowWrapper(escrowId, jobPubkey, depositSol, sessionIdBytes)
+    await this.delegateToPer(escrowId)
+
+    const session: MppSessionState = {
+      sessionId,
+      escrowId,
+      totalPaid: 0,
+      requestCount: 0,
+      isActive: true,
+    }
+    this.activeSessions.set(escrowId, session)
+
+    // MPP Session would be opened here pointing to PER RPC:
+    // const mppSession = new MppSession({ rpc: config.perEndpoint, ... })
+    // For now, the session is tracked locally — MPP SDK plugs in when published
+
+    return session
   }
 
-  async addDisputePanelAccess(channelId: number, permissionPda: PublicKey, panelMember: PublicKey): Promise<string> {
-    const [channelPda] = deriveChannelPda(channelId)
+  async recordPayment(escrowId: number, amountLamports: number): Promise<void> {
+    const session = this.activeSessions.get(escrowId)
+    if (!session || !session.isActive) throw new Error('No active session for this escrow')
 
-    return this.program.methods
-      .addDisputePanelAccess(new BN(channelId), panelMember)
-      .accounts({
-        channel: channelPda,
-        permission: permissionPda,
-        payer: this.provider.wallet.publicKey,
-        permissionProgram: PERMISSION_PROGRAM_ID,
-      })
-      .rpc()
+    session.totalPaid += amountLamports
+    session.requestCount += 1
+
+    // MPP voucher would be sent here inside PER:
+    // await mppSession.sendVoucher(amountLamports)
+    // PER RPC endpoint ensures this is private
+  }
+
+  async closeSession(escrowId: number): Promise<string> {
+    const session = this.activeSessions.get(escrowId)
+    if (!session) throw new Error('No session for this escrow')
+
+    session.isActive = false
+    const totalPaidSol = session.totalPaid / LAMPORTS_PER_SOL
+
+    const tx = await this.recordSettlement(escrowId, totalPaidSol)
+    this.activeSessions.delete(escrowId)
+    return tx
   }
 
   // ── Read State ────────────────────────────────────────────────
 
-  async getChannel(channelId: number): Promise<ChannelState | null> {
-    const [channelPda] = deriveChannelPda(channelId)
+  async getEscrow(escrowId: number): Promise<EscrowState | null> {
+    const [escrowPda] = deriveEscrowPda(escrowId)
     try {
-      const account = await (this.program.account as Record<string, { fetch: (key: PublicKey) => Promise<Record<string, unknown>> }>).paymentChannel.fetch(channelPda)
-      const statusMap: Record<number, ChannelState['status']> = { 0: 'Open', 1: 'Settling', 2: 'Closed' }
+      const account = await (this.program.account as Record<string, { fetch: (key: PublicKey) => Promise<Record<string, unknown>> }>).escrowWrapper.fetch(escrowPda)
+      const statusMap: Record<number, EscrowState['status']> = { 0: 'Active', 1: 'Delegated', 2: 'Settled' }
       return {
-        channelId: (account.channelId as BN).toNumber(),
+        escrowId: (account.escrowId as BN).toNumber(),
+        jobPubkey: account.jobPubkey as PublicKey,
         poster: account.poster as PublicKey,
         agent: account.agent as PublicKey,
         deposited: (account.deposited as BN).toNumber(),
-        claimed: (account.claimed as BN).toNumber(),
-        voucherCount: (account.voucherCount as BN).toNumber(),
-        lastVoucherAmount: (account.lastVoucherAmount as BN).toNumber(),
-        status: statusMap[(account.status as { open?: unknown; settling?: unknown; closed?: unknown }).open !== undefined ? 0 : (account.status as { settling?: unknown }).settling !== undefined ? 1 : 2] ?? 'Open',
+        status: statusMap[(account.status as { active?: unknown }).active !== undefined ? 0 : (account.status as { delegated?: unknown }).delegated !== undefined ? 1 : 2] ?? 'Active',
+        teePubkey: account.teePubkey as number[],
+        teeVerified: account.teeVerified as boolean,
+        mppSessionId: account.mppSessionId as number[],
         createdAt: (account.createdAt as BN).toNumber(),
-        expiresAt: (account.expiresAt as BN).toNumber(),
       }
     } catch {
       return null
     }
   }
 
-  async getSettlement(channelId: number): Promise<SettlementState | null> {
-    const [settlementPda] = deriveSettlementPda(channelId)
+  async getSettlement(escrowId: number): Promise<SettlementState | null> {
+    const [settlementPda] = deriveSettlementPda(escrowId)
     try {
       const account = await (this.program.account as Record<string, { fetch: (key: PublicKey) => Promise<Record<string, unknown>> }>).settlementRecord.fetch(settlementPda)
       return {
-        channelId: (account.channelId as BN).toNumber(),
+        escrowId: (account.escrowId as BN).toNumber(),
+        jobPubkey: account.jobPubkey as PublicKey,
         poster: account.poster as PublicKey,
         agent: account.agent as PublicKey,
         totalDeposited: (account.totalDeposited as BN).toNumber(),
-        totalClaimed: (account.totalClaimed as BN).toNumber(),
-        voucherCount: (account.voucherCount as BN).toNumber(),
+        totalPaid: (account.totalPaid as BN).toNumber(),
         settledAt: (account.settledAt as BN).toNumber(),
         settlementHash: account.settlementHash as number[],
       }
@@ -314,10 +250,13 @@ export class DarkForest {
     }
   }
 
+  getActiveSession(escrowId: number): MppSessionState | undefined {
+    return this.activeSessions.get(escrowId)
+  }
+
   // ── PDA Helpers ───────────────────────────────────────────────
 
-  static channelPda(channelId: number): PublicKey { return deriveChannelPda(channelId)[0] }
-  static voucherPda(channelId: number): PublicKey { return deriveVoucherPda(channelId)[0] }
-  static settlementPda(channelId: number): PublicKey { return deriveSettlementPda(channelId)[0] }
+  static escrowPda(escrowId: number): PublicKey { return deriveEscrowPda(escrowId)[0] }
+  static settlementPda(escrowId: number): PublicKey { return deriveSettlementPda(escrowId)[0] }
   static get programId(): PublicKey { return PROGRAM_ID }
 }

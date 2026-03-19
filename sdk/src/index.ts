@@ -22,8 +22,8 @@ export {
   applyTemplate,
 } from './templates'
 export type { TemplateId, SpecTemplate } from './templates'
-export { DarkForest, TEE_VALIDATORS, ER_ENDPOINTS } from './dark-forest'
-export type { ChannelState, SettlementState } from './dark-forest'
+export { DarkForestPayments, TEE_VALIDATORS, PER_ENDPOINTS } from './dark-forest'
+export type { EscrowState, SettlementState, MppSessionConfig, MppSessionState } from './dark-forest'
 export type {
   TaskForestSpec,
   AcceptanceCriterion,
