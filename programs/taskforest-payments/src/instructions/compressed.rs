@@ -11,15 +11,16 @@ use light_sdk::{
 use crate::constants::*;
 use crate::errors::TaskforestPaymentsError;
 use crate::state::compressed::CompressedSettlement;
-use crate::state::payment::PaymentChannel;
+use crate::state::payment::EscrowWrapper;
 
 pub fn handler_compress_settlement<'info>(
     ctx: Context<'_, '_, '_, 'info, CompressSettlementAccounts<'info>>,
     proof: ValidityProof,
     address_tree_info: PackedAddressTreeInfo,
     output_state_tree_index: u8,
+    total_paid: u64,
 ) -> Result<()> {
-    let channel = &ctx.accounts.channel;
+    let escrow = &ctx.accounts.escrow;
     let clock = Clock::get()?;
 
     let light_cpi_accounts = LightCpiAccounts::new(
@@ -28,9 +29,9 @@ pub fn handler_compress_settlement<'info>(
         LIGHT_CPI_SIGNER,
     );
 
-    let channel_key = channel.key();
+    let escrow_key = escrow.key();
     let (_address, address_seed) = light_sdk::address::v1::derive_address(
-        &[b"compressed_settlement", channel_key.as_ref()],
+        &[b"compressed_settlement", escrow_key.as_ref()],
         &address_tree_info
             .get_tree_pubkey(&light_cpi_accounts)
             .map_err(|_| ErrorCode::AccountNotEnoughKeys)?,
@@ -42,15 +43,14 @@ pub fn handler_compress_settlement<'info>(
         Some(_address),
         output_state_tree_index,
     );
-    compressed.channel_id = channel.channel_id;
-    compressed.job_pubkey = channel.job_pubkey;
-    compressed.poster = channel.poster;
-    compressed.agent = channel.agent;
-    compressed.total_deposited = channel.deposited;
-    compressed.total_claimed = channel.claimed;
-    compressed.voucher_count = channel.voucher_count;
+    compressed.escrow_id = escrow.escrow_id;
+    compressed.job_pubkey = escrow.job_pubkey;
+    compressed.poster = escrow.poster;
+    compressed.agent = escrow.agent;
+    compressed.total_deposited = escrow.deposited;
+    compressed.total_paid = total_paid;
     compressed.settled_at = clock.unix_timestamp;
-    compressed.settlement_hash = compute_hash(channel);
+    compressed.mpp_session_id = escrow.mpp_session_id;
 
     LightSystemProgramCpi::new_cpi(LIGHT_CPI_SIGNER, proof)
         .with_light_account(compressed)
@@ -60,38 +60,13 @@ pub fn handler_compress_settlement<'info>(
         .invoke(light_cpi_accounts)
         .map_err(|_| TaskforestPaymentsError::CompressionFailed)?;
 
-    msg!("Settlement compressed for channel {}", channel.channel_id);
+    msg!("Settlement compressed for escrow {}", escrow.escrow_id);
     Ok(())
-}
-
-fn compute_hash(channel: &PaymentChannel) -> [u8; 32] {
-    let mut data = Vec::with_capacity(152);
-    data.extend_from_slice(&channel.channel_id.to_le_bytes());
-    data.extend_from_slice(&channel.job_pubkey.to_bytes());
-    data.extend_from_slice(&channel.poster.to_bytes());
-    data.extend_from_slice(&channel.agent.to_bytes());
-    data.extend_from_slice(&channel.deposited.to_le_bytes());
-    data.extend_from_slice(&channel.claimed.to_le_bytes());
-    data.extend_from_slice(&channel.voucher_count.to_le_bytes());
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut result = [0u8; 32];
-    for chunk_start in (0..data.len()).step_by(8) {
-        let mut hasher = DefaultHasher::new();
-        data[chunk_start..].hash(&mut hasher);
-        let h = hasher.finish().to_le_bytes();
-        let offset = (chunk_start / 8) % 4;
-        for i in 0..8 {
-            result[offset * 8 + i] ^= h[i];
-        }
-    }
-    result
 }
 
 #[derive(Accounts)]
 pub struct CompressSettlementAccounts<'info> {
-    #[account(mut)]
-    pub channel: Account<'info, PaymentChannel>,
+    pub escrow: Account<'info, EscrowWrapper>,
     #[account(mut)]
     pub signer: Signer<'info>,
 }
