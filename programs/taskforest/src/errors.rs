@@ -50,4 +50,14 @@ pub enum TaskForestError {
     QuorumNotReached,
     #[msg("Not a designated panel verifier")]
     NotPanelVerifier,
+    #[msg("Payment channel is not open")]
+    ChannelNotOpen,
+    #[msg("Voucher cumulative amount must be monotonically increasing")]
+    VoucherNotMonotonic,
+    #[msg("Cumulative voucher amount exceeds channel deposit")]
+    InsufficientChannelDeposit,
+    #[msg("Nothing to claim from channel")]
+    NothingToClaim,
+    #[msg("Payment channel arithmetic overflow")]
+    ChannelOverflow,
 }

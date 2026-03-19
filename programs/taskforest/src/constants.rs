@@ -1,3 +1,4 @@
+use anchor_lang::prelude::*;
 use light_sdk::{cpi::CpiSigner, derive_light_cpi_signer};
 
 /// CPI signer for Light System Program compressed account operations.
@@ -33,3 +34,8 @@ pub const PRIVACY_PER: u8 = 2;
 /// If they don't, worker can call claim_timeout to auto-win.
 pub const REVIEW_PERIOD_SECS: i64 = 3600;
 pub const DISPUTE_WINDOW_SECS: i64 = 86400;
+
+pub const CHANNEL_SEED: &[u8] = b"channel";
+pub const VOUCHER_SEED: &[u8] = b"voucher";
+pub const SETTLEMENT_SEED: &[u8] = b"settlement";
+pub const PERMISSION_PROGRAM_ID: Pubkey = pubkey!("ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1");
