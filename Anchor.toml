@@ -7,11 +7,9 @@ skip-lint = false
 
 [programs.devnet]
 taskforest = "Fgiye795epSDkytp6a334Y2AwjqdGDecWV24yc2neZ4s"
-dark_forest = "DFpay111111111111111111111111111111111111111"
 
 [programs.localnet]
 taskforest = "Fgiye795epSDkytp6a334Y2AwjqdGDecWV24yc2neZ4s"
-dark_forest = "DFpay111111111111111111111111111111111111111"
 
 [registry]
 url = "https://api.apr.dev"
