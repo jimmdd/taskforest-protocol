@@ -18,4 +18,6 @@ pub enum TaskforestPaymentsError {
     InvalidAttestation,
     #[msg("TEE attestation report exceeds maximum size")]
     AttestationTooLarge,
+    #[msg("ZK compression failed")]
+    CompressionFailed,
 }

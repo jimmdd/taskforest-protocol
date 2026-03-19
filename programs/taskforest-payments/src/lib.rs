@@ -6,6 +6,7 @@ pub mod state;
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::ephemeral;
 use instructions::*;
+use light_sdk::instruction::{PackedAddressTreeInfo, ValidityProof};
 
 declare_id!("DFpay111111111111111111111111111111111111111");
 
@@ -93,5 +94,19 @@ pub mod taskforest_payments {
         tee_pubkey: [u8; 32],
     ) -> Result<()> {
         payment::handler_verify_tee_attestation(ctx, channel_id, attestation_report, tee_pubkey)
+    }
+
+    pub fn compress_settlement<'info>(
+        ctx: Context<'_, '_, '_, 'info, CompressSettlementAccounts<'info>>,
+        proof: ValidityProof,
+        address_tree_info: PackedAddressTreeInfo,
+        output_state_tree_index: u8,
+    ) -> Result<()> {
+        compressed::handler_compress_settlement(
+            ctx,
+            proof,
+            address_tree_info,
+            output_state_tree_index,
+        )
     }
 }
