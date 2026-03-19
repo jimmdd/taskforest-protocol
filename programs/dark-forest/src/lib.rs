@@ -393,6 +393,36 @@ pub mod dark_forest {
         );
         Ok(())
     }
+
+    // ── Settlement Snapshot (on-chain record of final state) ──────
+
+    pub fn record_settlement(ctx: Context<RecordSettlement>, channel_id: u64) -> Result<()> {
+        let channel = &ctx.accounts.channel;
+        let record = &mut ctx.accounts.settlement_record;
+
+        record.channel_id = channel_id;
+        record.poster = channel.poster;
+        record.agent = channel.agent;
+        record.total_deposited = channel.deposited;
+        record.total_claimed = channel.claimed;
+        record.voucher_count = channel.voucher_count;
+        record.settled_at = Clock::get()?.unix_timestamp;
+        record.settlement_hash = compute_settlement_hash(
+            channel_id,
+            &channel.poster,
+            &channel.agent,
+            channel.deposited,
+            channel.claimed,
+            channel.voucher_count,
+        );
+
+        msg!(
+            "Settlement recorded for channel {} — hash: {:?}",
+            channel_id,
+            &record.settlement_hash[..8]
+        );
+        Ok(())
+    }
 }
 
 // ── Account Structures ────────────────────────────────────────────
@@ -449,6 +479,24 @@ pub struct Voucher {
 
 impl Voucher {
     pub const LEN: usize = 8 + 8 + 8 + 32 + 32 + 8;
+}
+
+const SETTLEMENT_SEED: &[u8] = b"settlement";
+
+#[account]
+pub struct SettlementRecord {
+    pub channel_id: u64,
+    pub poster: Pubkey,
+    pub agent: Pubkey,
+    pub total_deposited: u64,
+    pub total_claimed: u64,
+    pub voucher_count: u64,
+    pub settled_at: i64,
+    pub settlement_hash: [u8; 32],
+}
+
+impl SettlementRecord {
+    pub const LEN: usize = 8 + 32 + 32 + 8 + 8 + 8 + 8 + 32;
 }
 
 // ── Instruction Contexts ──────────────────────────────────────────
@@ -595,9 +643,57 @@ pub enum DelegateAccountType {
     Voucher { channel_id: u64 },
 }
 
+#[derive(Accounts)]
+#[instruction(channel_id: u64)]
+pub struct RecordSettlement<'info> {
+    #[account(seeds = [CHANNEL_SEED, &channel_id.to_le_bytes()], bump)]
+    pub channel: Account<'info, PaymentChannel>,
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + SettlementRecord::LEN,
+        seeds = [SETTLEMENT_SEED, &channel_id.to_le_bytes()],
+        bump
+    )]
+    pub settlement_record: Account<'info, SettlementRecord>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 pub struct PermissionMember {
     pub address: Pubkey,
     pub role: u8,
+}
+
+fn compute_settlement_hash(
+    channel_id: u64,
+    poster: &Pubkey,
+    agent: &Pubkey,
+    deposited: u64,
+    claimed: u64,
+    voucher_count: u64,
+) -> [u8; 32] {
+    let mut data = Vec::with_capacity(120);
+    data.extend_from_slice(&channel_id.to_le_bytes());
+    data.extend_from_slice(&poster.to_bytes());
+    data.extend_from_slice(&agent.to_bytes());
+    data.extend_from_slice(&deposited.to_le_bytes());
+    data.extend_from_slice(&claimed.to_le_bytes());
+    data.extend_from_slice(&voucher_count.to_le_bytes());
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut result = [0u8; 32];
+    for chunk_start in (0..data.len()).step_by(8) {
+        let mut hasher = DefaultHasher::new();
+        data[chunk_start..].hash(&mut hasher);
+        let h = hasher.finish().to_le_bytes();
+        let offset = (chunk_start / 8) % 4;
+        for i in 0..8 {
+            result[offset * 8 + i] ^= h[i];
+        }
+    }
+    result
 }
 
 fn derive_delegate_seeds(account_type: &DelegateAccountType) -> Vec<Vec<u8>> {
