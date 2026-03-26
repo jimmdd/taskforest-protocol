@@ -141,6 +141,14 @@ pub mod taskforest {
         bidding::handler_lock_stake(ctx)
     }
 
+    pub fn verify_bid_attestation(
+        ctx: Context<VerifyBidAttestation>,
+        attestation_report: Vec<u8>,
+        tee_pubkey: [u8; 32],
+    ) -> Result<()> {
+        tee::handler_verify_bid_attestation(ctx, attestation_report, tee_pubkey)
+    }
+
     pub fn submit_proof(ctx: Context<SubmitProof>, proof_hash: [u8; 32]) -> Result<()> {
         proof::handler_submit_proof(ctx, proof_hash)
     }

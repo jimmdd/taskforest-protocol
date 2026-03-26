@@ -6,6 +6,7 @@ pub mod dispute;
 pub mod job;
 pub mod proof;
 pub mod settlement;
+pub mod tee;
 pub mod ttd;
 
 pub use bidding::*;
@@ -16,4 +17,5 @@ pub use dispute::*;
 pub use job::*;
 pub use proof::*;
 pub use settlement::*;
+pub use tee::*;
 pub use ttd::*;

@@ -30,6 +30,8 @@ pub struct Job {
     pub receipt_uri: [u8; 32],           // 32 — hash of URI where full DAG stored
     pub attestation_hash: [u8; 32],      // 32 — TEE attestation hash
     pub dispute_window_end: i64,         // 8 — when dispute window closes (0 = no window)
+    pub tee_pubkey: [u8; 32],            // 32 — TEE enclave public key (PER bidding)
+    pub tee_verified: bool,              // 1  — whether PER TEE attestation passed
     pub bump: u8,                        // 1
 }
 
@@ -62,5 +64,7 @@ impl Job {
         + 32
         + 32
         + 8
+        + 32      // tee_pubkey
+        + 1       // tee_verified
         + 1;
 }

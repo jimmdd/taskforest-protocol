@@ -73,6 +73,8 @@ pub fn handler_initialize_job(
     job.receipt_uri = [0u8; 32];
     job.attestation_hash = [0u8; 32];
     job.dispute_window_end = 0;
+    job.tee_pubkey = [0u8; 32];
+    job.tee_verified = false;
     job.bump = ctx.bumps.job;
 
     msg!(
@@ -173,6 +175,8 @@ pub fn handler_create_sub_job(
     sub_job.receipt_uri = [0u8; 32];
     sub_job.attestation_hash = [0u8; 32];
     sub_job.dispute_window_end = 0;
+    sub_job.tee_pubkey = [0u8; 32];
+    sub_job.tee_verified = false;
     sub_job.bump = ctx.bumps.sub_job;
 
     parent_job.sub_job_count = parent_job

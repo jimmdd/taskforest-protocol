@@ -51,10 +51,12 @@ pub fn handler_place_bid(ctx: Context<PlaceBid>, stake_lamports: u64) -> Result<
 }
 
 /// Close bidding: select winner, commit+undelegate back to L1.
+/// Requires TEE attestation to have been verified (PER bidding).
 pub fn handler_close_bidding(ctx: Context<CloseBidding>) -> Result<()> {
     let job = &mut ctx.accounts.job;
     require!(job.status == STATUS_BIDDING, TaskForestError::WrongStatus);
     require!(job.bid_count > 0, TaskForestError::WrongStatus);
+    require!(job.tee_verified, TaskForestError::TeeNotVerified);
 
     job.claimer = job.best_bidder;
     job.claimer_stake = job.best_bid_stake;

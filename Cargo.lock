@@ -716,26 +716,6 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ebb432c4e5f748d843cd368d3e2389ce682601b07261be41cda4180eb8c665f"
-dependencies = [
- "anchor-lang 0.32.1",
- "base64ct",
- "borsh 1.6.0",
- "ephemeral-rollups-sdk-attribute-action 0.6.6",
- "ephemeral-rollups-sdk-attribute-commit 0.6.6",
- "ephemeral-rollups-sdk-attribute-delegate 0.6.6",
- "ephemeral-rollups-sdk-attribute-ephemeral 0.6.6",
- "getrandom 0.2.17",
- "magicblock-delegation-program",
- "magicblock-magic-program-api 0.3.1",
- "solana-program",
- "solana-system-interface",
-]
-
-[[package]]
-name = "ephemeral-rollups-sdk"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5382adbd81b6532054e6b270c2bac713bf6ca03fa8391dc67259bd9a96f9822b"
@@ -743,26 +723,16 @@ dependencies = [
  "anchor-lang 0.32.1",
  "base64ct",
  "borsh 0.10.4",
- "ephemeral-rollups-sdk-attribute-action 0.8.8",
- "ephemeral-rollups-sdk-attribute-commit 0.8.8",
- "ephemeral-rollups-sdk-attribute-delegate 0.8.8",
- "ephemeral-rollups-sdk-attribute-ephemeral 0.8.8",
+ "ephemeral-rollups-sdk-attribute-action",
+ "ephemeral-rollups-sdk-attribute-commit",
+ "ephemeral-rollups-sdk-attribute-delegate",
+ "ephemeral-rollups-sdk-attribute-ephemeral",
  "ephemeral-rollups-sdk-attribute-ephemeral-accounts",
  "getrandom 0.2.17",
  "magicblock-delegation-program",
- "magicblock-magic-program-api 0.8.3",
+ "magicblock-magic-program-api",
  "solana-program",
  "solana-system-interface",
-]
-
-[[package]]
-name = "ephemeral-rollups-sdk-attribute-action"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72f0b983783d3e2fa9e921a1760b606a830acff5a2d17493dd97c50971653090"
-dependencies = [
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -770,16 +740,6 @@ name = "ephemeral-rollups-sdk-attribute-action"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31804758eef070c3c46d12cd826b97fa373f8e0431e665641f3e055e0114de5a"
-dependencies = [
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eaa12b48570efab341b925df215470cdb5bbd6edf09132cba0bf3608672e261"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -797,31 +757,9 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "868eb256937326dc1ee629477c1935a8a8fbdb6dabcc5b926e8534f7390c4387"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "ephemeral-rollups-sdk-attribute-delegate"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bbfaa338039b11e9fefa2b7abf8649706d0f7012177b3327b6b8742854ce986"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "ephemeral-rollups-sdk-attribute-ephemeral"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3194e93f3c5265da16111b9b8a70bece5a191614f4e8209d056e06ddc2cbad8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1226,17 +1164,6 @@ dependencies = [
  "num_enum",
  "solana-program",
  "static_assertions",
-]
-
-[[package]]
-name = "magicblock-magic-program-api"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce6ec80d63618a71bb4db324ec5fdca8f85552d0469a51aa063d290256d425f5"
-dependencies = [
- "bincode",
- "serde",
- "solana-program",
 ]
 
 [[package]]
@@ -2513,7 +2440,7 @@ dependencies = [
  "anchor-lang 0.32.1",
  "blake3",
  "borsh 0.10.4",
- "ephemeral-rollups-sdk 0.6.6",
+ "ephemeral-rollups-sdk",
  "light-sdk",
 ]
 
@@ -2524,7 +2451,7 @@ dependencies = [
  "anchor-lang 0.32.1",
  "blake3",
  "borsh 0.10.4",
- "ephemeral-rollups-sdk 0.8.8",
+ "ephemeral-rollups-sdk",
  "light-sdk",
  "taskforest",
 ]

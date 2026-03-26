@@ -52,4 +52,16 @@ pub enum TaskForestError {
     NotPanelVerifier,
     #[msg("Invalid verification mode")]
     InvalidVerificationMode,
+    #[msg("TEE attestation not verified for this job")]
+    TeeNotVerified,
+    #[msg("Invalid TEE attestation report")]
+    InvalidAttestation,
+    #[msg("TEE attestation signature missing or invalid")]
+    InvalidAttestationSignature,
+    #[msg("TEE attestation has expired")]
+    AttestationExpired,
+    #[msg("TEE attestation does not match job state")]
+    AttestationMismatch,
+    #[msg("Validator is not in the allowlist")]
+    InvalidValidator,
 }
