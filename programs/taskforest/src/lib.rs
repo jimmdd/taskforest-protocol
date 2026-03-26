@@ -39,24 +39,26 @@ pub mod taskforest {
         job_id: u64,
         reward_lamports: u64,
         deadline: i64,
-        proof_spec_hash: [u8; 32],
+        spec_hash: [u8; 32],
         ttd_hash: [u8; 32],
         privacy_level: u8,
         encryption_pubkey: [u8; 32],
         assignment_mode: u8,
         verification_level: u8,
+        verification_mode: u8,
     ) -> Result<()> {
         job::handler_initialize_job(
             ctx,
             job_id,
             reward_lamports,
             deadline,
-            proof_spec_hash,
+            spec_hash,
             ttd_hash,
             privacy_level,
             encryption_pubkey,
             assignment_mode,
             verification_level,
+            verification_mode,
         )
     }
 

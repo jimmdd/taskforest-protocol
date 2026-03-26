@@ -1,5 +1,16 @@
 {
+  "private": true,
+  "workspaces": [
+    "sdk",
+    "dark-forest"
+  ],
   "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "localnet:start": "anchor run light",
+    "localnet:stop": "anchor run light-stop",
+    "test:local:payments": "ANCHOR_PROVIDER_URL=http://127.0.0.1:8899 ANCHOR_WALLET=keys/taskforest.json npx ts-mocha -p ./tsconfig.json -t 1000000 tests/taskforest-payments.ts",
+    "test:local:compress": "ANCHOR_PROVIDER_URL=http://127.0.0.1:8899 ANCHOR_WALLET=keys/taskforest.json npx ts-mocha -p ./tsconfig.json -t 120000 tests/compress-settlement.ts",
+    "test:local": "./scripts/test-local.sh",
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
   },
@@ -9,6 +20,7 @@
     "@solana/web3.js": "^1.95.8"
   },
   "devDependencies": {
+    "@lightprotocol/stateless.js": "^0.22.0",
     "@types/bn.js": "^5.1.0",
     "@types/chai": "^4.3.0",
     "@types/mocha": "^9.0.0",

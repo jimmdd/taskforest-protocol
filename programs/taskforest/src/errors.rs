@@ -50,4 +50,6 @@ pub enum TaskForestError {
     QuorumNotReached,
     #[msg("Not a designated panel verifier")]
     NotPanelVerifier,
+    #[msg("Invalid verification mode")]
+    InvalidVerificationMode,
 }

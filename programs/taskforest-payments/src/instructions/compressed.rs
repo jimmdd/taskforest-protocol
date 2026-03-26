@@ -22,6 +22,14 @@ pub fn handler_compress_settlement<'info>(
 ) -> Result<()> {
     let escrow = &ctx.accounts.escrow;
     let clock = Clock::get()?;
+    msg!(
+        "compress_settlement remaining_accounts={} root_index={} address_tree_index={} address_queue_index={} output_state_tree_index={}",
+        ctx.remaining_accounts.len(),
+        address_tree_info.root_index,
+        address_tree_info.address_merkle_tree_pubkey_index,
+        address_tree_info.address_queue_pubkey_index,
+        output_state_tree_index,
+    );
 
     let light_cpi_accounts = LightCpiAccounts::new(
         ctx.accounts.signer.as_ref(),
@@ -56,7 +64,7 @@ pub fn handler_compress_settlement<'info>(
         .with_light_account(compressed)
         .map_err(|_| TaskforestPaymentsError::CompressionFailed)?
         .with_new_addresses(&[address_tree_info
-            .into_new_address_params_assigned_packed(address_seed, Some(output_state_tree_index))])
+            .into_new_address_params_assigned_packed(address_seed, Some(0))])
         .invoke(light_cpi_accounts)
         .map_err(|_| TaskforestPaymentsError::CompressionFailed)?;
 

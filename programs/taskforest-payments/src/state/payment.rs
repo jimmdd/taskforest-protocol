@@ -19,6 +19,7 @@ pub struct EscrowWrapper {
     pub job_pubkey: Pubkey,
     pub poster: Pubkey,
     pub agent: Pubkey,
+    pub validator: Pubkey,
     pub deposited: u64,
     pub status: EscrowStatus,
     pub tee_pubkey: [u8; 32],
@@ -33,6 +34,7 @@ impl EscrowWrapper {
         + 32      // job_pubkey
         + 32      // poster
         + 32      // agent
+        + 32      // validator
         + 8       // deposited
         + 1       // status
         + 32      // tee_pubkey

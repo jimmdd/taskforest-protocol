@@ -29,6 +29,11 @@ pub const PRIVACY_PUBLIC: u8 = 0;
 pub const PRIVACY_ENCRYPTED: u8 = 1;
 pub const PRIVACY_PER: u8 = 2;
 
+// --- Verification modes ---
+pub const VERIFICATION_POSTER_REVIEW: u8 = 0;
+pub const VERIFICATION_TEST_SUITE: u8 = 1;
+pub const VERIFICATION_JUDGE: u8 = 2;
+
 /// Review period: poster has 1 hour after proof submission to settle.
 /// If they don't, worker can call claim_timeout to auto-win.
 pub const REVIEW_PERIOD_SECS: i64 = 3600;

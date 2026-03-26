@@ -13,14 +13,19 @@ pub fn handler_initialize_job(
     job_id: u64,
     reward_lamports: u64,
     deadline: i64,
-    proof_spec_hash: [u8; 32],
+    spec_hash: [u8; 32],
     ttd_hash: [u8; 32],
     privacy_level: u8,
     encryption_pubkey: [u8; 32],
     assignment_mode: u8,
     verification_level: u8,
+    verification_mode: u8,
 ) -> Result<()> {
     require!(reward_lamports > 0, TaskForestError::InvalidReward);
+    require!(
+        verification_mode <= VERIFICATION_JUDGE,
+        TaskForestError::InvalidVerificationMode
+    );
 
     let clock = Clock::get()?;
     require!(
@@ -45,7 +50,7 @@ pub fn handler_initialize_job(
     job.job_id = job_id;
     job.reward_lamports = reward_lamports;
     job.deadline = deadline;
-    job.proof_spec_hash = proof_spec_hash;
+    job.spec_hash = spec_hash;
     job.ttd_hash = ttd_hash;
     job.privacy_level = privacy_level;
     job.encryption_pubkey = encryption_pubkey;
@@ -63,6 +68,7 @@ pub fn handler_initialize_job(
     job.parent_job = Pubkey::default();
     job.sub_job_count = 0;
     job.verification_level = verification_level;
+    job.verification_mode = verification_mode;
     job.receipt_root = [0u8; 32];
     job.receipt_uri = [0u8; 32];
     job.attestation_hash = [0u8; 32];
@@ -129,10 +135,11 @@ pub fn handler_create_sub_job(
     );
 
     let parent_poster = parent_job.poster;
-    let parent_proof_spec_hash = parent_job.proof_spec_hash;
+    let parent_spec_hash = parent_job.spec_hash;
     let parent_privacy_level = parent_job.privacy_level;
     let parent_encryption_pubkey = parent_job.encryption_pubkey;
     let parent_verification_level = parent_job.verification_level;
+    let parent_verification_mode = parent_job.verification_mode;
 
     let sub_job_info = ctx.accounts.sub_job.to_account_info();
     **parent_job_info.try_borrow_mut_lamports()? -= reward_lamports;
@@ -143,7 +150,7 @@ pub fn handler_create_sub_job(
     sub_job.job_id = sub_job_id;
     sub_job.reward_lamports = reward_lamports;
     sub_job.deadline = deadline;
-    sub_job.proof_spec_hash = parent_proof_spec_hash;
+    sub_job.spec_hash = parent_spec_hash;
     sub_job.ttd_hash = ttd_hash;
     sub_job.privacy_level = parent_privacy_level;
     sub_job.encryption_pubkey = parent_encryption_pubkey;
@@ -161,6 +168,7 @@ pub fn handler_create_sub_job(
     sub_job.parent_job = parent_key;
     sub_job.sub_job_count = 0;
     sub_job.verification_level = parent_verification_level;
+    sub_job.verification_mode = parent_verification_mode;
     sub_job.receipt_root = [0u8; 32];
     sub_job.receipt_uri = [0u8; 32];
     sub_job.attestation_hash = [0u8; 32];

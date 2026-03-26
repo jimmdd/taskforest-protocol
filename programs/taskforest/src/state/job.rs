@@ -7,7 +7,7 @@ pub struct Job {
     pub job_id: u64,                     // 8
     pub reward_lamports: u64,            // 8
     pub deadline: i64,                   // 8
-    pub proof_spec_hash: [u8; 32],       // 32
+    pub spec_hash: [u8; 32],             // 32 — committed spec hash for this job
     pub ttd_hash: [u8; 32],              // 32
     pub privacy_level: u8,               // 1  — 0=public, 1=encrypted, 2=per
     pub encryption_pubkey: [u8; 32],     // 32 — poster's X25519 pubkey for encrypted jobs
@@ -25,6 +25,7 @@ pub struct Job {
     pub parent_job: Pubkey,              // 32 — Pubkey::default() if root job
     pub sub_job_count: u16,              // 2
     pub verification_level: u8,          // 1 — 0-4
+    pub verification_mode: u8,           // 1 — 0=poster_review, 1=test_suite, 2=judge
     pub receipt_root: [u8; 32],          // 32 — Merkle root of execution DAG
     pub receipt_uri: [u8; 32],           // 32 — hash of URI where full DAG stored
     pub attestation_hash: [u8; 32],      // 32 — TEE attestation hash
@@ -55,6 +56,7 @@ impl Job {
         + 1
         + 32
         + 2
+        + 1
         + 1
         + 32
         + 32

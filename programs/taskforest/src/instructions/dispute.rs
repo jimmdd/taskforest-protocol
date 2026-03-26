@@ -47,6 +47,7 @@ pub fn handler_open_dispute(
 
     let dispute = &mut ctx.accounts.dispute;
     dispute.job = job.key();
+    dispute.spec_hash = job.spec_hash;
     dispute.challenger = ctx.accounts.challenger.key();
     dispute.challenger_stake = stake_lamports;
     dispute.disputed_thread = disputed_thread;

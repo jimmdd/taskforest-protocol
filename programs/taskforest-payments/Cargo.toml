@@ -24,4 +24,5 @@ anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 ephemeral-rollups-sdk = { version = "0.8", features = ["anchor"] }
 light-sdk = { version = "0.16.0", default-features = false, features = ["anchor", "v2"] }
 borsh = "0.10.0"
+blake3 = "=1.5.5"
 taskforest = { path = "../taskforest", features = ["cpi"] }

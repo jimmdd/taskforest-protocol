@@ -9,6 +9,7 @@ import {
 import * as anchor from '@coral-xyz/anchor'
 import nacl from 'tweetnacl'
 import { createHash } from 'crypto'
+import { hashSpec } from './spec'
 
 import {
   TaskForestConfig,
@@ -70,6 +71,12 @@ const PRIVACY_MAP: Record<PrivacyLevel, number> = {
   public: 0,
   encrypted: 1,
   per: 2,
+}
+
+const VERIFICATION_MODE_MAP: Record<'poster_review' | 'test_suite' | 'judge', number> = {
+  poster_review: 0,
+  test_suite: 1,
+  judge: 2,
 }
 
 /**
@@ -178,10 +185,19 @@ export class TaskForest {
    * Post a new task with SOL escrow.
    *
    * ```ts
+   * const spec = new SpecBuilder('Review my Solana program')
+   *   .description('Review the repository and return a markdown report.')
+   *   .criterion('ac-1', 'Cover the requested scope', 'coverage', { required: true, weight: 50 })
+   *   .criterion('ac-2', 'Return a markdown report', 'output', { required: true, weight: 50 })
+   *   .input('url', 'Repository URL')
+   *   .output('file', 'Audit report', { format: 'markdown' })
+   *   .judgeMode('Score each criterion from 0-100.', 70)
+   *   .build()
+   *
    * const job = await tf.postTask({
-   *   title: 'Review my Solana program',
-   *   ttd: 'code-review-v1',
-   *   input: { repo_url: 'https://github.com/...', language: 'rust' },
+   *   title: spec.metadata.title,
+   *   input: { repo_url: 'https://github.com/example/repo' },
+   *   spec,
    *   reward: 0.5,
    *   deadline: '2h',
    *   privacy: 'encrypted',
@@ -194,11 +210,14 @@ export class TaskForest {
     const rewardLamports = Math.floor(opts.reward * LAMPORTS_PER_SOL)
     const deadlineSec = this.parseDeadline(opts.deadline)
     const privacyLevel = PRIVACY_MAP[opts.privacy || 'public']
-    const proofSpecHash = opts.specHash ?? this.hashData({ title: opts.title, ...opts.input })
+    const specHash = opts.specHash ?? (opts.spec ? hashSpec(opts.spec) : this.hashData({ title: opts.title, ...opts.input }))
     const ttdHash = opts.ttd ? this.hashData(opts.ttd) : Array.from({ length: 32 }, () => 0)
     const encryptionPubkey = privacyLevel > 0
       ? Array.from(this.encryptionKeypair.publicKey)
       : Array.from({ length: 32 }, () => 0)
+    const assignmentMode = opts.assignmentMode === 'auto-match' ? 1 : 0
+    const verificationLevel = opts.verificationLevel ?? 0
+    const verificationMode = VERIFICATION_MODE_MAP[opts.verificationMode ?? opts.spec?.verification.mode ?? 'poster_review']
 
     // Batch init + delegate into 1 tx (1 signature)
     const initIx = await (this.program.methods as any)
@@ -206,10 +225,13 @@ export class TaskForest {
         new anchor.BN(jobId),
         new anchor.BN(rewardLamports),
         new anchor.BN(deadlineSec),
-        proofSpecHash,
+        specHash,
         ttdHash,
         privacyLevel,
-        encryptionPubkey
+        encryptionPubkey,
+        assignmentMode,
+        verificationLevel,
+        verificationMode
       )
       .accounts({ job: jobPDA, poster: this.wallet.publicKey, systemProgram: SystemProgram.programId })
       .instruction()
@@ -258,7 +280,7 @@ export class TaskForest {
           statusLabel: STATUS_LABELS[decoded.status] || 'unknown',
           proofHash: decoded.proofHash || [],
           privacyLevel: decoded.privacyLevel ?? 0,
-          specHash: decoded.proofSpecHash || [],
+          specHash: decoded.specHash || [],
           ttdHash: decoded.ttdHash || [],
           claimerStake: decoded.claimerStake?.toNumber?.() ?? 0,
           bestBidStake: decoded.bestBidStake?.toNumber?.() ?? 0,
@@ -267,6 +289,7 @@ export class TaskForest {
           parentJob: decoded.parentJob ?? PublicKey.default,
           subJobCount: decoded.subJobCount ?? 0,
           verificationLevel: decoded.verificationLevel ?? 0,
+          verificationMode: decoded.verificationMode ?? 0,
           receiptRoot: decoded.receiptRoot || [],
           receiptUri: decoded.receiptUri || [],
           attestationHash: decoded.attestationHash || [],
@@ -308,7 +331,7 @@ export class TaskForest {
         statusLabel: STATUS_LABELS[decoded.status] || 'unknown',
         proofHash: decoded.proofHash || [],
         privacyLevel: decoded.privacyLevel ?? 0,
-        specHash: decoded.proofSpecHash || [],
+          specHash: decoded.specHash || [],
         ttdHash: decoded.ttdHash || [],
         claimerStake: decoded.claimerStake?.toNumber?.() ?? 0,
         bestBidStake: decoded.bestBidStake?.toNumber?.() ?? 0,
@@ -317,6 +340,7 @@ export class TaskForest {
         parentJob: decoded.parentJob ?? PublicKey.default,
         subJobCount: decoded.subJobCount ?? 0,
         verificationLevel: decoded.verificationLevel ?? 0,
+        verificationMode: decoded.verificationMode ?? 0,
         receiptRoot: decoded.receiptRoot || [],
         receiptUri: decoded.receiptUri || [],
         attestationHash: decoded.attestationHash || [],
@@ -528,7 +552,7 @@ export class TaskForest {
    * Watch for matching tasks and execute a handler.
    *
    * ```ts
-   * tf.onTask({ ttds: ['code-review-v1'], minReward: 0.1 }, async (task) => {
+   * tf.onTask({ minReward: 0.1, status: 'open' }, async (task) => {
    *   const input = await task.getInput()
    *   await task.submitProof(result)
    * })
@@ -884,6 +908,7 @@ export class TaskForest {
       return {
         pubkey: disputePDA,
         job: decoded.job,
+        specHash: decoded.specHash || [],
         challenger: decoded.challenger,
         challengerStake: decoded.challengerStake?.toNumber?.() ?? 0,
         disputedThread: decoded.disputedThread ?? 0,

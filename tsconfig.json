@@ -9,5 +9,10 @@
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["tests/taskforest.ts", "tests/taskforest-payments.ts"]
+  "include": [
+    "tests/taskforest.ts",
+    "tests/taskforest-payments.ts",
+    "tests/compress-settlement.ts",
+    "tests/payments-er-devnet.ts"
+  ]
 }

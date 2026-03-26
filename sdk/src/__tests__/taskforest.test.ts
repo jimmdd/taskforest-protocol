@@ -79,6 +79,7 @@ vi.spyOn(Connection.prototype, 'getAccountInfo').mockResolvedValue(null)
 vi.spyOn(Connection.prototype, 'getProgramAccounts').mockResolvedValue([])
 
 import { TaskForest } from '../taskforest'
+import type { TaskForestSpec } from '../spec'
 
 // ── Mock sendTx to bypass real signing/serialization ───────────
 vi.spyOn(TaskForest.prototype as any, 'sendTx').mockResolvedValue(mockTxSig)
@@ -101,7 +102,7 @@ describe('TaskForest SDK', () => {
   describe('constructor', () => {
     it('initializes with correct program ID', () => {
       expect(sdk.getProgramId()).toBeInstanceOf(PublicKey)
-      expect(sdk.getProgramId().toBase58()).toBe('Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS')
+      expect(sdk.getProgramId().toBase58()).toBe('Fgiye795epSDkytp6a334Y2AwjqdGDecWV24yc2neZ4s')
     })
 
     it('exposes wallet public key', () => {
@@ -166,6 +167,34 @@ describe('TaskForest SDK', () => {
         deadline: '2h',
         ttd: 'code-review-v1',
       })
+      expect(result.jobId).toBeGreaterThan(0)
+    })
+
+    it('accepts a canonical spec object for spec-hash commitment', async () => {
+      const spec: TaskForestSpec = {
+        version: 1,
+        metadata: { title: 'Spec backed task', tags: ['code-review'] },
+        description: 'Review a repo against explicit acceptance criteria',
+        acceptance_criteria: [
+          { id: 'ac-1', description: 'Report findings', type: 'output', required: true, weight: 100 },
+        ],
+        constraints: [],
+        inputs: [{ type: 'url', description: 'Repository URL', encrypted: false }],
+        outputs: [{ type: 'text', description: 'Review report', format: 'markdown' }],
+        verification: {
+          mode: 'judge',
+          config: { rubric: 'Score completeness and correctness', required_criteria_must_pass: true },
+        },
+      }
+
+      const result = await sdk.postTask({
+        title: 'Spec backed task',
+        input: { repo: 'github.com/test' },
+        spec,
+        reward: 0.5,
+        deadline: '2h',
+      })
+
       expect(result.jobId).toBeGreaterThan(0)
     })
   })

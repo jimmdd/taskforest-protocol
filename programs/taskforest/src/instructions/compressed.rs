@@ -273,10 +273,12 @@ pub fn handler_compress_finished_job<'info>(
     compressed.job_id = job.job_id;
     compressed.reward_lamports = job.reward_lamports;
     compressed.deadline = job.deadline;
+    compressed.spec_hash = job.spec_hash;
     compressed.ttd_hash = job.ttd_hash;
     compressed.assignment_mode = job.assignment_mode;
     compressed.parent_job = job.parent_job;
     compressed.verification_level = job.verification_level;
+    compressed.verification_mode = job.verification_mode;
     compressed.receipt_root = job.receipt_root;
     compressed.attestation_hash = job.attestation_hash;
     compressed.privacy_level = job.privacy_level;

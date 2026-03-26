@@ -1,6 +1,7 @@
 # Rust / Anchor
 /target
 .anchor/
+/test-ledger
 
 # Dependencies
 node_modules/

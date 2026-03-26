@@ -45,10 +45,12 @@ pub struct CompressedJob {
     pub job_id: u64,                // 8
     pub reward_lamports: u64,       // 8
     pub deadline: i64,              // 8
+    pub spec_hash: [u8; 32],        // 32
     pub ttd_hash: [u8; 32],         // 32
     pub assignment_mode: u8,        // 1
     pub parent_job: Pubkey,         // 32
     pub verification_level: u8,     // 1
+    pub verification_mode: u8,      // 1
     pub receipt_root: [u8; 32],     // 32
     pub attestation_hash: [u8; 32], // 32
     pub privacy_level: u8,          // 1

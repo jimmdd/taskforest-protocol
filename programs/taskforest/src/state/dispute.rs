@@ -4,6 +4,7 @@ use anchor_lang::prelude::*;
 #[derive(Default)]
 pub struct DisputeRecord {
     pub job: Pubkey,                       // 32
+    pub spec_hash: [u8; 32],              // 32
     pub challenger: Pubkey,                // 32
     pub challenger_stake: u64,             // 8
     pub disputed_thread: u32,              // 4
@@ -17,7 +18,7 @@ pub struct DisputeRecord {
 }
 
 impl DisputeRecord {
-    pub const SIZE: usize = 8 + 32 + 32 + 8 + 4 + 32 + 32 + 1 + 32 + 8 + 8 + 1;
+    pub const SIZE: usize = 8 + 32 + 32 + 32 + 8 + 4 + 32 + 32 + 1 + 32 + 8 + 8 + 1;
 }
 
 #[account]

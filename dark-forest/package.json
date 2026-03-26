@@ -1,7 +1,7 @@
 {
-  "name": "@taskforest/sdk",
-  "version": "0.4.0",
-  "description": "TypeScript SDK for TaskForest — the verifiable task layer for agents and humans on Solana · ZK compressed",
+  "name": "@taskforest/dark-forest",
+  "version": "0.1.2",
+  "description": "Dark Forest payment helpers for TaskForest: MPP wrapper, PER delegation, and settlement utilities",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -10,12 +10,10 @@
   "keywords": [
     "solana",
     "taskforest",
-    "agents",
-    "ai",
-    "mcp",
-    "escrow",
-    "task",
-    "sdk"
+    "payments",
+    "magicblock",
+    "per",
+    "mpp"
   ],
   "license": "MIT",
   "repository": {
@@ -25,17 +23,14 @@
   "homepage": "https://taskforest.xyz",
   "scripts": {
     "build": "tsc",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "npm run build && node --test dist/__tests__/*.test.js",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.30.1",
-    "@solana/web3.js": "^1.95.0",
-    "tweetnacl": "^1.0.3"
+    "@solana/web3.js": "^1.95.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "vitest": "^4.0.18"
+    "typescript": "^5.4.0"
   }
 }

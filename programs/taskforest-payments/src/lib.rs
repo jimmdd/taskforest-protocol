@@ -24,8 +24,8 @@ pub mod taskforest_payments {
         payment::handler_create_escrow_wrapper(ctx, escrow_id, deposit_lamports, mpp_session_id)
     }
 
-    pub fn delegate_to_per(ctx: Context<DelegateToPer>) -> Result<()> {
-        payment::handler_delegate_to_per(ctx)
+    pub fn delegate_to_per(ctx: Context<DelegateToPer>, escrow_id: u64) -> Result<()> {
+        payment::handler_delegate_to_per(ctx, escrow_id)
     }
 
     pub fn verify_tee_attestation(

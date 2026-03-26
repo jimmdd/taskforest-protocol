@@ -1,4 +1,5 @@
 import { Keypair, PublicKey } from '@solana/web3.js'
+import type { TaskForestSpec, VerificationMode } from './spec'
 
 /** SDK configuration */
 export interface TaskForestConfig {
@@ -20,10 +21,15 @@ export interface PostTaskOptions {
   ttd?: string
   title: string
   input: Record<string, any>
+  /** Canonical TaskForest Spec to hash and commit on-chain. Preferred over ad hoc input hashing. */
+  spec?: TaskForestSpec
   reward: number
   deadline: string | number
   privacy?: PrivacyLevel
-  /** Pre-computed spec hash (from hashSpec). If provided, used as proof_spec_hash on-chain. */
+  assignmentMode?: AssignmentMode
+  verificationLevel?: VerificationLevel
+  verificationMode?: VerificationMode
+  /** Pre-computed spec hash (from hashSpec). If provided, used as spec_hash on-chain. */
   specHash?: number[]
 }
 
@@ -63,7 +69,7 @@ export interface Job {
   statusLabel: string
   proofHash: number[]
   privacyLevel: number
-  /** SHA-256 hash of the TaskForest Spec (maps to on-chain proof_spec_hash) */
+  /** SHA-256 hash of the TaskForest Spec (maps to on-chain spec_hash) */
   specHash: number[]
   /** @deprecated Use specHash. TTD is replaced by spec-driven routing. Kept for backward compat. */
   ttdHash: number[]
@@ -74,6 +80,7 @@ export interface Job {
   parentJob: PublicKey
   subJobCount: number
   verificationLevel: number
+  verificationMode: number
   receiptRoot: number[]
   receiptUri: number[]
   attestationHash: number[]
@@ -252,6 +259,7 @@ export interface ReceiptDAG {
 export interface DisputeRecord {
   pubkey: PublicKey
   job: PublicKey
+  specHash: number[]
   challenger: PublicKey
   challengerStake: number
   disputedThread: number

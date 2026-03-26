@@ -73,7 +73,8 @@ describe("taskforest core", () => {
         0,
         hash32(0),
         0,
-        verificationLevel
+        verificationLevel,
+        0
       )
       .accountsPartial({
         job,
@@ -93,6 +94,7 @@ describe("taskforest core", () => {
     expect(fetched.jobId.toString()).to.eq(jobId.toString());
     expect(fetched.rewardLamports.toString()).to.eq("2000000");
     expect(fetched.deadline.toString()).to.eq(deadline.toString());
+    expect(fetched.specHash).to.deep.eq(hash32(1));
     expect(fetched.status).to.eq(0);
   });
 
@@ -109,6 +111,7 @@ describe("taskforest core", () => {
           hash32(2),
           0,
           hash32(0),
+          0,
           0,
           0
         )
@@ -137,6 +140,7 @@ describe("taskforest core", () => {
           hash32(2),
           0,
           hash32(0),
+          0,
           0,
           0
         )
@@ -320,6 +324,7 @@ describe("taskforest core", () => {
 
     const fetched = await program.account.disputeRecord.fetch(dispute);
     expect(fetched.job.toBase58()).to.eq(job.toBase58());
+    expect(fetched.specHash).to.deep.eq(hash32(1));
     expect(fetched.disputedThread).to.eq(disputedThread);
     expect(fetched.status).to.eq(0);
   });
