@@ -7,6 +7,9 @@ on:
 jobs:
   publish-sdk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for trusted publishing (provenance)
     defaults:
       run:
         working-directory: sdk
@@ -25,12 +28,15 @@ jobs:
         run: npm run build
 
       - name: Publish @taskforest/sdk
-        run: npm publish --access public
+        run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-dark-forest:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: dark-forest
@@ -49,6 +55,6 @@ jobs:
         run: npm run build
 
       - name: Publish @taskforest/dark-forest
-        run: npm publish --access public
+        run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
